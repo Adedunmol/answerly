@@ -9,7 +9,7 @@ CREATE TYPE gender AS ENUM (
 
 CREATE TYPE auth_provider AS ENUM (
   'email',
-  'google',
+  'google'
 );
 
 CREATE TABLE users (
