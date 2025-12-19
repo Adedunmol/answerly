@@ -1,0 +1,31 @@
+services:
+  app:
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    build:
+      context: .
+      target: dev-stage
+    container_name: scrapy
+    hostname: scrapy
+    networks:
+      - scrapy
+    ports:
+      - ${PORT}:5001
+    env_file: ".env"
+    deploy:
+      restart_policy:
+        condition: on-failure
+  #    volumes:
+  #      - .:/app
+  #      - /app/tmp
+
+  postgres:
+    env_file: ".env"
+    extends:
+      service: postgres
+      file: docker-compose.base.yml
+
+volumes:
+  postgres-data:
