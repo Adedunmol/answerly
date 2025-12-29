@@ -7,10 +7,52 @@ package database
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createUser = `-- name: CreateUser :one
+INSERT INTO users (email, password)
+VALUES ($1, $2)
+RETURNING id, email, email_verified, password, role, google_id, auth_provider, refresh_token, created_at, updated_at, deleted_at
+`
+
+type CreateUserParams struct {
+	Email    string
+	Password string
+}
+
+func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, createUser, arg.Email, arg.Password)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.Password,
+		&i.Role,
+		&i.GoogleID,
+		&i.AuthProvider,
+		&i.RefreshToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const deleteRefreshToken = `-- name: DeleteRefreshToken :exec
+UPDATE users SET refresh_token = ''
+WHERE refresh_token = $1
+`
+
+func (q *Queries) DeleteRefreshToken(ctx context.Context, refreshToken pgtype.Text) error {
+	_, err := q.db.Exec(ctx, deleteRefreshToken, refreshToken)
+	return err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, username, email, email_verified, password_hash, google_id, auth_provider, created_at, updated_at, deleted_at FROM users
+SELECT id, email, email_verified, password, role, google_id, auth_provider, refresh_token, created_at, updated_at, deleted_at FROM users
 WHERE email = $1 LIMIT 1
 `
 
@@ -19,15 +61,106 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	var i User
 	err := row.Scan(
 		&i.ID,
-		&i.Username,
 		&i.Email,
 		&i.EmailVerified,
-		&i.PasswordHash,
+		&i.Password,
+		&i.Role,
 		&i.GoogleID,
 		&i.AuthProvider,
+		&i.RefreshToken,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
 	)
 	return i, err
+}
+
+const getUserByID = `-- name: GetUserByID :one
+SELECT id, email, email_verified, password, role, google_id, auth_provider, refresh_token, created_at, updated_at, deleted_at FROM users
+WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetUserByID(ctx context.Context, id int64) (User, error) {
+	row := q.db.QueryRow(ctx, getUserByID, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.Password,
+		&i.Role,
+		&i.GoogleID,
+		&i.AuthProvider,
+		&i.RefreshToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getUserWithRefreshToken = `-- name: GetUserWithRefreshToken :one
+SELECT id, email, email_verified, password, role, google_id, auth_provider, refresh_token, created_at, updated_at, deleted_at FROM users
+WHERE refresh_token = $1
+`
+
+func (q *Queries) GetUserWithRefreshToken(ctx context.Context, refreshToken pgtype.Text) (User, error) {
+	row := q.db.QueryRow(ctx, getUserWithRefreshToken, refreshToken)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.EmailVerified,
+		&i.Password,
+		&i.Role,
+		&i.GoogleID,
+		&i.AuthProvider,
+		&i.RefreshToken,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const rotateRefreshToken = `-- name: RotateRefreshToken :exec
+UPDATE users
+SET refresh_token = $1
+WHERE refresh_token = $2
+`
+
+type RotateRefreshTokenParams struct {
+	NewToken pgtype.Text
+	OldToken pgtype.Text
+}
+
+func (q *Queries) RotateRefreshToken(ctx context.Context, arg RotateRefreshTokenParams) error {
+	_, err := q.db.Exec(ctx, rotateRefreshToken, arg.NewToken, arg.OldToken)
+	return err
+}
+
+const updateUser = `-- name: UpdateUser :exec
+UPDATE users
+SET
+    email_verified = COALESCE($1, email_verified),
+    password = COALESCE($2, password),
+    refresh_token = COALESCE($3, refresh_token)
+WHERE id = $4
+`
+
+type UpdateUserParams struct {
+	EmailVerified pgtype.Bool
+	Password      pgtype.Text
+	RefreshToken  pgtype.Text
+	ID            int64
+}
+
+func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
+	_, err := q.db.Exec(ctx, updateUser,
+		arg.EmailVerified,
+		arg.Password,
+		arg.RefreshToken,
+		arg.ID,
+	)
+	return err
 }

@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.env.example
+README.md
+#.air.toml
+tmp/
+vendor/
+*.log
+.vscode/
+.idea/
+*.md
+Dockerfile
+docker-compose*.yml
+.dockerignore
