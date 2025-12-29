@@ -100,6 +100,7 @@ type Field struct {
 	ID        int64
 	Name      string
 	CreatedAt pgtype.Timestamp
+	UpdatedAt pgtype.Timestamp
 }
 
 type InterestArea struct {
@@ -114,7 +115,7 @@ type OtpVerification struct {
 	UserID    int64
 	Code      string
 	ExpiresAt pgtype.Timestamp
-	IsUsed    pgtype.Bool
+	Domain    pgtype.Text
 	CreatedAt pgtype.Timestamp
 	UpdatedAt pgtype.Timestamp
 }
@@ -135,12 +136,13 @@ type Profile struct {
 
 type User struct {
 	ID            int64
-	Username      pgtype.Text
 	Email         string
 	EmailVerified pgtype.Bool
-	PasswordHash  pgtype.Text
+	Password      string
+	Role          string
 	GoogleID      pgtype.Text
 	AuthProvider  NullAuthProvider
+	RefreshToken  pgtype.Text
 	CreatedAt     pgtype.Timestamp
 	UpdatedAt     pgtype.Timestamp
 	DeletedAt     pgtype.Timestamp
