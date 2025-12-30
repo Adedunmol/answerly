@@ -74,9 +74,7 @@ CREATE TABLE interest_areas (
     UNIQUE(user_id, field_id)
 );
 
-CREATE INDEX idx_users_email ON users(email);
 CREATE INDEX idx_users_google_id ON users(google_id);
-CREATE INDEX idx_users_deleted_at ON users(deleted_at);
 CREATE INDEX idx_wallets_user_id ON wallets(user_id, balance);
 CREATE INDEX idx_profiles_user_id ON profiles(user_id);
 CREATE INDEX idx_otp_code ON otp_verifications(user_id, domain, created_at);
