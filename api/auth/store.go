@@ -45,6 +45,7 @@ func (r *Repository) CreateUser(ctx context.Context, body *CreateUserBody) (data
 	data, err := r.queries.CreateUser(ctx, database.CreateUserParams{
 		Email:    body.Email,
 		Password: body.Password,
+		Role:     body.Role,
 	})
 
 	if err != nil {

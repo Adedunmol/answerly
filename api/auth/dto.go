@@ -18,6 +18,7 @@ type CreateUserBody struct {
 	Password        string `json:"password" validate:"required"`
 	ConfirmPassword string `json:"password_confirmation" validate:"required,eqfield=Password"`
 	Email           string `json:"email" validate:"required,email"`
+	Role            string
 }
 
 type LoginUserBody struct {

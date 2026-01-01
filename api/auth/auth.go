@@ -16,6 +16,11 @@ import (
 	"time"
 )
 
+var allowedRoles = map[string]bool{
+	"user":       true,
+	"researcher": true,
+}
+
 const TokenExpiration = 30
 
 type Response struct {
@@ -60,6 +65,25 @@ func (h *Handler) CreateUserHandler(responseWriter http.ResponseWriter, request 
 	}
 
 	data.Password = string(hashedPassword)
+
+	q := request.URL.Query()
+
+	role := q.Get("role")
+
+	if role == "" {
+		role = "user"
+	}
+
+	if !allowedRoles[role] {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: "invalid role",
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusBadRequest)
+		return
+	}
+
+	data.Role = role
 
 	user, err := h.Store.CreateUser(ctx, &data)
 
@@ -160,7 +184,7 @@ func (h *Handler) CreateUserHandler(responseWriter http.ResponseWriter, request 
 		log.Printf("error enqueuing email task: %s", err)
 	}
 
-	_, refreshToken := h.Token.GenerateToken(int(user.ID), data.Email, true, "user") // user.Verified // role
+	_, refreshToken := h.Token.GenerateToken(int(user.ID), data.Email, user.EmailVerified.Bool, "user") // user.Verified // role
 
 	updateUser := UpdateUserBody{RefreshToken: refreshToken}
 
@@ -201,7 +225,7 @@ func (h *Handler) LoginUserHandler(responseWriter http.ResponseWriter, request *
 		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusUnauthorized)
 		return
 	}
-	token, refreshToken := h.Token.GenerateToken(int(user.ID), data.Email, true, "") //user.Verified // role
+	token, refreshToken := h.Token.GenerateToken(int(user.ID), data.Email, user.EmailVerified.Bool, user.Role) //user.Verified // role
 	updateUser := UpdateUserBody{RefreshToken: refreshToken}
 	if err = h.Store.UpdateUser(ctx, int(user.ID), updateUser); err != nil {
 		response := jsonutil.Response{Status: "error", Message: err.Error()}
