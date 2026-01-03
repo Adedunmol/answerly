@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/Adedunmol/answerly/api/tokens"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/Adedunmol/answerly/api/auth"
 	"github.com/Adedunmol/answerly/api/custom_errors"
+	"github.com/Adedunmol/answerly/api/tokens"
 	"github.com/Adedunmol/answerly/database"
 	"github.com/Adedunmol/answerly/queue"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -63,21 +63,17 @@ func (s *StubTokenService) ComparePasswords(storedPassword, candidatePassword st
 }
 
 func (s *StubTokenService) GenerateToken(userID int, email string, verified bool, role string) (string, string) {
-	//if s.ShouldFailToken {
-	//	return "", errors.New("failed to generate token")
-	//}
 	return "mock-jwt-token", "mock-refresh-token"
 }
 
-func (s *StubTokenService) DecodeToken(tokenString string) (tokens.Claims, error) {
-	// You can add logic here to fail if tokenString is "invalid-token" if needed
+func (s *StubTokenService) DecodeToken(tokenString string) (*tokens.Claims, error) {
 	if tokenString == "invalid-token" {
-		return tokens.Claims{}, errors.New("invalid token")
+		return nil, errors.New("invalid token")
 	}
 
-	// Return a valid mock claim
-	return tokens.Claims{
-		// valid mock data
+	return &tokens.Claims{
+		UserID: 1,
+		Email:  "test@example.com",
 	}, nil
 }
 
@@ -95,7 +91,8 @@ func (q *StubQueue) Enqueue(processor queue.Processor) error {
 }
 
 type StubOTPStore struct {
-	OTPs               map[int64]auth.OTP
+	OTPs               map[string]string // key: userID-domain, value: otp
+	Expirations        map[string]time.Time
 	ShouldFailCreate   bool
 	ShouldFailDelete   bool
 	ShouldFailValidate bool
@@ -103,55 +100,53 @@ type StubOTPStore struct {
 
 func NewStubOTPStore() *StubOTPStore {
 	return &StubOTPStore{
-		OTPs: make(map[int64]auth.OTP),
+		OTPs:        make(map[string]string),
+		Expirations: make(map[string]time.Time),
 	}
 }
 
-// Fix: Signature changed to match Interface (expiration is int)
-// Fix: Removed undefined `E: email` assignment
-func (s *StubOTPStore) CreateOTP(userID int64, otp string, expiration time.Time) error {
+func (s *StubOTPStore) CreateOTP(ctx context.Context, userID int64, code string, expiration time.Time, domain string) error {
 	if s.ShouldFailCreate {
 		return errors.New("failed to create OTP")
 	}
 
-	futureTime := expiration
-	currentTime := time.Now()
-
-	s.OTPs[userID] = auth.OTP{
-		ID: 1,
-		// E field removed as it wasn't passed and caused compilation error
-		OTP:       otp,
-		ExpiresAt: &futureTime,
-		CreatedAt: &currentTime,
-	}
+	key := s.makeKey(userID, domain)
+	s.OTPs[key] = code
+	s.Expirations[key] = expiration
 	return nil
 }
 
-// Fix: Signature changed to match Interface (returns string, error)
-// Fix: Logic updated to return the OTP string instead of boolean
-func (s *StubOTPStore) GetOTP(userID int64) (string, error) {
+func (s *StubOTPStore) GetOTP(ctx context.Context, userID int64, domain string) (string, error) {
 	if s.ShouldFailValidate {
 		return "", errors.New("validation error")
 	}
 
-	otpData, exists := s.OTPs[userID]
+	key := s.makeKey(userID, domain)
+	otp, exists := s.OTPs[key]
 	if !exists {
-		return "", custom_errors.ErrInvalidOtp
+		return "", custom_errors.ErrInvalidOTP
 	}
 
-	if otpData.ExpiresAt.Before(time.Now()) {
-		return "", custom_errors.ErrInvalidOtp
+	expiration, hasExpiration := s.Expirations[key]
+	if hasExpiration && expiration.Before(time.Now()) {
+		return "", custom_errors.ErrInvalidOTP
 	}
 
-	return otpData.OTP, nil
+	return otp, nil
 }
 
-func (s *StubOTPStore) DeleteOTP(userID int64) error {
+func (s *StubOTPStore) DeleteOTP(ctx context.Context, userID int64, domain string) error {
 	if s.ShouldFailDelete {
 		return errors.New("failed to delete OTP")
 	}
-	delete(s.OTPs, userID)
+	key := s.makeKey(userID, domain)
+	delete(s.OTPs, key)
+	delete(s.Expirations, key)
 	return nil
+}
+
+func (s *StubOTPStore) makeKey(userID int64, domain string) string {
+	return string(rune(userID)) + "-" + domain
 }
 
 type StubUserStore struct {
@@ -169,35 +164,31 @@ func NewStubUserStore() *StubUserStore {
 	}
 }
 
-func (s *StubUserStore) CreateUser(body *auth.CreateUserBody) (database.CreateUserRow, error) {
+func (s *StubUserStore) CreateUser(ctx context.Context, body *auth.CreateUserBody) (database.User, error) {
 	if s.ShouldFailCreate {
-		return database.CreateUserRow{}, errors.New("database error")
+		return database.User{}, errors.New("database error")
 	}
 
 	for _, u := range s.Users {
 		if u.Email == body.Email {
-			return database.CreateUserRow{}, custom_errors.ErrConflict
+			return database.User{}, custom_errors.ErrConflict
 		}
 	}
 
 	user := database.User{
 		ID:            int64(len(s.Users) + 1),
-		Username:      pgtype.Text{String: body.Username, Valid: true},
 		Email:         body.Email,
-		PasswordHash:  pgtype.Text{String: body.Password, Valid: true},
+		Password:      body.Password,
 		EmailVerified: pgtype.Bool{Bool: false, Valid: true},
+		Role:          body.Role,
 	}
 
 	s.Users = append(s.Users, user)
 
-	return database.CreateUserRow{
-		ID:       user.ID,
-		Username: user.Username,
-		Email:    user.Email,
-	}, nil
+	return user, nil
 }
 
-func (s *StubUserStore) FindUserByEmail(email string) (database.User, error) {
+func (s *StubUserStore) FindUserByEmail(ctx context.Context, email string) (database.User, error) {
 	if s.ShouldFailFind {
 		return database.User{}, errors.New("database error")
 	}
@@ -210,7 +201,7 @@ func (s *StubUserStore) FindUserByEmail(email string) (database.User, error) {
 	return database.User{}, errors.New("user not found")
 }
 
-func (s *StubUserStore) FindUserByID(id int) (database.User, error) {
+func (s *StubUserStore) FindUserByID(ctx context.Context, id int) (database.User, error) {
 	if s.ShouldFailFind {
 		return database.User{}, errors.New("database error")
 	}
@@ -223,7 +214,7 @@ func (s *StubUserStore) FindUserByID(id int) (database.User, error) {
 	return database.User{}, errors.New("user not found")
 }
 
-func (s *StubUserStore) UpdateUser(id int, data auth.UpdateUserBody) error {
+func (s *StubUserStore) UpdateUser(ctx context.Context, id int, data auth.UpdateUserBody) error {
 	if s.ShouldFailUpdate {
 		return errors.New("database error")
 	}
@@ -234,7 +225,7 @@ func (s *StubUserStore) UpdateUser(id int, data auth.UpdateUserBody) error {
 				s.Users[i].EmailVerified = pgtype.Bool{Bool: data.Verified, Valid: true}
 			}
 			if data.Password != "" {
-				s.Users[i].PasswordHash = pgtype.Text{String: data.Password, Valid: true}
+				s.Users[i].Password = data.Password
 			}
 			if data.RefreshToken != "" {
 				s.Users[i].RefreshToken = pgtype.Text{String: data.RefreshToken, Valid: true}
@@ -246,7 +237,20 @@ func (s *StubUserStore) UpdateUser(id int, data auth.UpdateUserBody) error {
 	return errors.New("user not found")
 }
 
-func (s *StubUserStore) DeleteRefreshToken(refreshToken string) error {
+func (s *StubUserStore) FindUserWithRefreshToken(ctx context.Context, refreshToken string) (database.User, error) {
+	if s.ShouldFailFind {
+		return database.User{}, errors.New("database error")
+	}
+
+	for _, u := range s.Users {
+		if u.RefreshToken.Valid && u.RefreshToken.String == refreshToken {
+			return u, nil
+		}
+	}
+	return database.User{}, errors.New("user not found")
+}
+
+func (s *StubUserStore) DeleteRefreshToken(ctx context.Context, refreshToken string) error {
 	if s.ShouldFailDeleteToken {
 		return errors.New("failed to delete token")
 	}
@@ -260,7 +264,7 @@ func (s *StubUserStore) DeleteRefreshToken(refreshToken string) error {
 	return nil
 }
 
-func (s *StubUserStore) UpdateRefreshToken(oldRefreshToken, refreshToken string) error {
+func (s *StubUserStore) UpdateRefreshToken(ctx context.Context, oldRefreshToken, refreshToken string) error {
 	if s.ShouldFailUpdateToken {
 		return errors.New("failed to update token")
 	}
@@ -293,10 +297,9 @@ func TestCreateUserHandler(t *testing.T) {
 		}
 
 		data := []byte(`{
-			"username": "johndoe",
 			"email": "john@example.com",
 			"password": "password123",
-			"date_of_birth": "1990-01-01"
+			"password_confirmation": "password123"
 		}`)
 
 		req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewBuffer(data))
@@ -360,10 +363,9 @@ func TestCreateUserHandler(t *testing.T) {
 		}
 
 		data := []byte(`{
-			"username": "johndoe",
 			"email": "john@example.com",
 			"password": "password123",
-			"date_of_birth": "1990-01-01"
+			"password_confirmation": "password123"
 		}`)
 
 		req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewBuffer(data))
@@ -387,10 +389,9 @@ func TestCreateUserHandler(t *testing.T) {
 		}
 
 		data := []byte(`{
-			"username": "johndoe",
 			"email": "john@example.com",
 			"password": "password123",
-			"date_of_birth": "1990-01-01"
+			"password_confirmation": "password123"
 		}`)
 
 		req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewBuffer(data))
@@ -413,10 +414,9 @@ func TestCreateUserHandler(t *testing.T) {
 		}
 
 		data := []byte(`{
-			"username": "johndoe",
 			"email": "john@example.com",
 			"password": "password123",
-			"date_of_birth": "1990-01-01"
+			"password_confirmation": "password123"
 		}`)
 
 		req := httptest.NewRequest(http.MethodPost, "/auth/register", bytes.NewBuffer(data))
@@ -435,12 +435,11 @@ func TestCreateUserHandler(t *testing.T) {
 func TestLoginUserHandler(t *testing.T) {
 	t.Run("successfully logs in a user", func(t *testing.T) {
 		store := NewStubUserStore()
-		// Fix: Use pgtype.Text and correct field names (PasswordHash, EmailVerified) to match pgx/database.User struct
 		store.Users = []database.User{
 			{
 				ID:            1,
 				Email:         "john@example.com",
-				PasswordHash:  pgtype.Text{String: "hashedpassword", Valid: true},
+				Password:      "hashedpassword",
 				EmailVerified: pgtype.Bool{Bool: true, Valid: true},
 			},
 		}
@@ -526,9 +525,9 @@ func TestLoginUserHandler(t *testing.T) {
 		store := NewStubUserStore()
 		store.Users = []database.User{
 			{
-				ID:           1,
-				Email:        "john@example.com",
-				PasswordHash: pgtype.Text{String: "correctpassword", Valid: true},
+				ID:       1,
+				Email:    "john@example.com",
+				Password: "correctpassword",
 			},
 		}
 
@@ -552,43 +551,14 @@ func TestLoginUserHandler(t *testing.T) {
 		assertResponseCode(t, rec.Code, http.StatusUnauthorized)
 	})
 
-	t.Run("returns 500 when token generation fails", func(t *testing.T) {
-		store := NewStubUserStore()
-		store.Users = []database.User{
-			{
-				ID:           1,
-				Email:        "john@example.com",
-				PasswordHash: pgtype.Text{String: "password123", Valid: true},
-			},
-		}
-
-		handler := &auth.Handler{
-			Store:    store,
-			OTPStore: NewStubOTPStore(),
-			Queue:    &StubQueue{},
-			Token:    &StubTokenService{ShouldFailToken: true},
-		}
-
-		data := []byte(`{
-			"email": "john@example.com",
-			"password": "password123"
-		}`)
-
-		req := httptest.NewRequest(http.MethodPost, "/auth/login", bytes.NewBuffer(data))
-		rec := httptest.NewRecorder()
-
-		handler.LoginUserHandler(rec, req)
-
-		assertResponseCode(t, rec.Code, http.StatusInternalServerError)
-	})
-
 	t.Run("returns 500 when update user fails", func(t *testing.T) {
 		store := NewStubUserStore()
 		store.Users = []database.User{
 			{
-				ID:           1,
-				Email:        "john@example.com",
-				PasswordHash: pgtype.Text{String: "password123", Valid: true},
+				ID:            1,
+				Email:         "john@example.com",
+				Password:      "password123",
+				EmailVerified: pgtype.Bool{Bool: true, Valid: true},
 			},
 		}
 		store.ShouldFailUpdate = true
@@ -620,15 +590,14 @@ func TestLoginUserHandler(t *testing.T) {
 
 func TestVerifyOTPHandler(t *testing.T) {
 	t.Run("successfully verifies OTP", func(t *testing.T) {
+		ctx := context.Background()
 		store := NewStubUserStore()
-		// Fix: Use EmailVerified with pgtype
 		store.Users = []database.User{
 			{ID: 1, Email: "john@example.com", EmailVerified: pgtype.Bool{Bool: false, Valid: true}},
 		}
 
 		otpStore := NewStubOTPStore()
-		// Fix: Pass int expiration (e.g., 30 minutes)
-		_ = otpStore.CreateOTP(1, "123456", time.Now().Add(30*time.Minute))
+		_ = otpStore.CreateOTP(ctx, 1, "123456", time.Now().Add(30*time.Minute), "verification")
 
 		handler := &auth.Handler{
 			Store:    store,
@@ -655,8 +624,7 @@ func TestVerifyOTPHandler(t *testing.T) {
 		assertResponseMessage(t, got, "User verified successfully")
 
 		// Check user is now verified
-		user, _ := store.FindUserByID(1)
-		// Fix: Check pgtype.Bool value
+		user, _ := store.FindUserByID(ctx, 1)
 		if !user.EmailVerified.Bool {
 			t.Error("expected user to be verified")
 		}
@@ -702,13 +670,14 @@ func TestVerifyOTPHandler(t *testing.T) {
 	})
 
 	t.Run("returns 400 when OTP is invalid", func(t *testing.T) {
+		ctx := context.Background()
 		store := NewStubUserStore()
 		store.Users = []database.User{
 			{ID: 1, Email: "john@example.com"},
 		}
 
 		otpStore := NewStubOTPStore()
-		_ = otpStore.CreateOTP(1, "123456", time.Now().Add(30*time.Minute))
+		_ = otpStore.CreateOTP(ctx, 1, "123456", time.Now().Add(30*time.Minute), "verification")
 
 		handler := &auth.Handler{
 			Store:    store,
@@ -731,13 +700,14 @@ func TestVerifyOTPHandler(t *testing.T) {
 	})
 
 	t.Run("returns 500 when delete OTP fails", func(t *testing.T) {
+		ctx := context.Background()
 		store := NewStubUserStore()
 		store.Users = []database.User{
 			{ID: 1, Email: "john@example.com"},
 		}
 
 		otpStore := NewStubOTPStore()
-		_ = otpStore.CreateOTP(1, "123456", time.Now().Add(30*time.Minute))
+		_ = otpStore.CreateOTP(ctx, 1, "123456", time.Now().Add(30*time.Minute), "verification")
 		otpStore.ShouldFailDelete = true
 
 		handler := &auth.Handler{
@@ -761,6 +731,7 @@ func TestVerifyOTPHandler(t *testing.T) {
 	})
 
 	t.Run("returns 500 when update user fails", func(t *testing.T) {
+		ctx := context.Background()
 		store := NewStubUserStore()
 		store.Users = []database.User{
 			{ID: 1, Email: "john@example.com"},
@@ -768,7 +739,7 @@ func TestVerifyOTPHandler(t *testing.T) {
 		store.ShouldFailUpdate = true
 
 		otpStore := NewStubOTPStore()
-		_ = otpStore.CreateOTP(1, "123456", time.Now().Add(30*time.Minute))
+		_ = otpStore.CreateOTP(ctx, 1, "123456", time.Now().Add(30*time.Minute), "verification")
 
 		handler := &auth.Handler{
 			Store:    store,
@@ -800,9 +771,8 @@ func TestLogoutUserHandler(t *testing.T) {
 		store := NewStubUserStore()
 		store.Users = []database.User{
 			{
-				ID:    1,
-				Email: "john@example.com",
-				// Fix: Use pgtype.Text instead of sql.NullString
+				ID:           1,
+				Email:        "john@example.com",
 				RefreshToken: pgtype.Text{String: "valid-token", Valid: true},
 			},
 		}
@@ -872,9 +842,8 @@ func TestLogoutUserHandler(t *testing.T) {
 func TestRequestCodeHandler(t *testing.T) {
 	t.Run("successfully sends verification code", func(t *testing.T) {
 		store := NewStubUserStore()
-		// Fix: Use pgtype.Text
 		store.Users = []database.User{
-			{ID: 1, Email: "john@example.com", Username: pgtype.Text{String: "johndoe", Valid: true}},
+			{ID: 1, Email: "john@example.com"},
 		}
 
 		otpStore := NewStubOTPStore()
@@ -974,7 +943,7 @@ func TestForgotPasswordRequestHandler(t *testing.T) {
 	t.Run("successfully sends forgot password code", func(t *testing.T) {
 		store := NewStubUserStore()
 		store.Users = []database.User{
-			{ID: 1, Email: "john@example.com", Username: pgtype.Text{String: "johndoe", Valid: true}},
+			{ID: 1, Email: "john@example.com"},
 		}
 
 		otpStore := NewStubOTPStore()
@@ -1003,11 +972,6 @@ func TestForgotPasswordRequestHandler(t *testing.T) {
 		if len(queue.Tasks) != 1 {
 			t.Errorf("expected 1 email task, got %d", len(queue.Tasks))
 		}
-
-		// Verify correct template was used
-		//if queue.Tasks[0].Payload["template"] != "forgot_password_mail" {
-		//	t.Error("expected forgot_password_mail template")
-		//}
 	})
 
 	t.Run("returns 400 when user not found", func(t *testing.T) {
@@ -1035,17 +999,18 @@ func TestForgotPasswordRequestHandler(t *testing.T) {
 
 func TestForgotPasswordHandler(t *testing.T) {
 	t.Run("successfully resets password with valid OTP", func(t *testing.T) {
+		ctx := context.Background()
 		store := NewStubUserStore()
 		store.Users = []database.User{
 			{
-				ID:           1,
-				Email:        "john@example.com",
-				PasswordHash: pgtype.Text{String: "oldpassword", Valid: true},
+				ID:       1,
+				Email:    "john@example.com",
+				Password: "oldpassword",
 			},
 		}
 
 		otpStore := NewStubOTPStore()
-		_ = otpStore.CreateOTP(1, "123456", time.Now().Add(30*time.Minute))
+		_ = otpStore.CreateOTP(ctx, 1, "123456", time.Now().Add(30*time.Minute), "forgot_password")
 
 		handler := &auth.Handler{
 			Store:    store,
@@ -1057,7 +1022,8 @@ func TestForgotPasswordHandler(t *testing.T) {
 		data := []byte(`{
 			"email": "john@example.com",
 			"code": "123456",
-			"new_password": "newpassword123"
+			"new_password": "newpassword123",
+			"new_password_confirm": "newpassword123"
 		}`)
 
 		req := httptest.NewRequest(http.MethodPost, "/auth/forgot-password", bytes.NewBuffer(data))
@@ -1074,13 +1040,14 @@ func TestForgotPasswordHandler(t *testing.T) {
 	})
 
 	t.Run("returns 400 with invalid OTP", func(t *testing.T) {
+		ctx := context.Background()
 		store := NewStubUserStore()
 		store.Users = []database.User{
 			{ID: 1, Email: "john@example.com"},
 		}
 
 		otpStore := NewStubOTPStore()
-		_ = otpStore.CreateOTP(1, "123456", time.Now().Add(30*time.Minute))
+		_ = otpStore.CreateOTP(ctx, 1, "123456", time.Now().Add(30*time.Minute), "forgot_password")
 
 		handler := &auth.Handler{
 			Store:    store,
@@ -1092,7 +1059,8 @@ func TestForgotPasswordHandler(t *testing.T) {
 		data := []byte(`{
 			"email": "john@example.com",
 			"code": "wrong-code",
-			"new_password": "newpassword123"
+			"new_password": "newpassword123",
+			"new_password_confirm": "newpassword123"
 		}`)
 
 		req := httptest.NewRequest(http.MethodPost, "/auth/forgot-password", bytes.NewBuffer(data))
@@ -1104,6 +1072,7 @@ func TestForgotPasswordHandler(t *testing.T) {
 	})
 
 	t.Run("returns 500 when update fails", func(t *testing.T) {
+		ctx := context.Background()
 		store := NewStubUserStore()
 		store.Users = []database.User{
 			{ID: 1, Email: "john@example.com"},
@@ -1111,7 +1080,7 @@ func TestForgotPasswordHandler(t *testing.T) {
 		store.ShouldFailUpdate = true
 
 		otpStore := NewStubOTPStore()
-		_ = otpStore.CreateOTP(1, "123456", time.Now().Add(30*time.Minute))
+		_ = otpStore.CreateOTP(ctx, 1, "123456", time.Now().Add(30*time.Minute), "forgot_password")
 
 		handler := &auth.Handler{
 			Store:    store,
@@ -1123,7 +1092,8 @@ func TestForgotPasswordHandler(t *testing.T) {
 		data := []byte(`{
 			"email": "john@example.com",
 			"code": "123456",
-			"new_password": "newpassword123"
+			"new_password": "newpassword123",
+			"new_password_confirm": "newpassword123"
 		}`)
 
 		req := httptest.NewRequest(http.MethodPost, "/auth/forgot-password", bytes.NewBuffer(data))
@@ -1141,12 +1111,13 @@ func TestForgotPasswordHandler(t *testing.T) {
 
 func TestResetPasswordHandler(t *testing.T) {
 	t.Run("successfully resets password for authenticated user", func(t *testing.T) {
+		ctx := context.Background()
 		store := NewStubUserStore()
 		store.Users = []database.User{
 			{
-				ID:           1,
-				Email:        "john@example.com",
-				PasswordHash: pgtype.Text{String: "oldpassword", Valid: true},
+				ID:       1,
+				Email:    "john@example.com",
+				Password: "oldpassword",
 			},
 		}
 
@@ -1159,12 +1130,16 @@ func TestResetPasswordHandler(t *testing.T) {
 
 		data := []byte(`{
 			"old_password": "oldpassword",
-			"new_password": "newpassword123"
+			"new_password": "newpassword123",
+			"new_password_confirm": "newpassword123"
 		}`)
 
-		ctx := context.WithValue(context.Background(), "email", "john@example.com")
+		reqCtx := context.WithValue(ctx, "claims", &tokens.Claims{
+			UserID: 1,
+			Email:  "john@example.com",
+		})
 		req := httptest.NewRequest(http.MethodPost, "/auth/reset-password", bytes.NewBuffer(data))
-		req = req.WithContext(ctx)
+		req = req.WithContext(reqCtx)
 		rec := httptest.NewRecorder()
 
 		handler.ResetPasswordHandler(rec, req)
@@ -1175,7 +1150,8 @@ func TestResetPasswordHandler(t *testing.T) {
 		assertResponseStatus(t, got, "Success")
 		assertResponseMessage(t, got, "Password has been reset successfully")
 	})
-	t.Run("returns 401 when no email in context", func(t *testing.T) {
+
+	t.Run("returns 401 when no claims in context", func(t *testing.T) {
 		handler := &auth.Handler{
 			Store:    NewStubUserStore(),
 			OTPStore: NewStubOTPStore(),
@@ -1184,9 +1160,10 @@ func TestResetPasswordHandler(t *testing.T) {
 		}
 
 		data := []byte(`{
-		"old_password": "oldpassword",
-		"new_password": "newpassword123"
-	}`)
+			"old_password": "oldpassword",
+			"new_password": "newpassword123",
+			"new_password_confirm": "newpassword123"
+		}`)
 
 		req := httptest.NewRequest(http.MethodPost, "/auth/reset-password", bytes.NewBuffer(data))
 		rec := httptest.NewRecorder()
@@ -1197,12 +1174,13 @@ func TestResetPasswordHandler(t *testing.T) {
 	})
 
 	t.Run("returns 401 when old password doesn't match", func(t *testing.T) {
+		ctx := context.Background()
 		store := NewStubUserStore()
 		store.Users = []database.User{
 			{
-				ID:           1,
-				Email:        "john@example.com",
-				PasswordHash: pgtype.Text{String: "correctpassword", Valid: true},
+				ID:       1,
+				Email:    "john@example.com",
+				Password: "correctpassword",
 			},
 		}
 
@@ -1214,13 +1192,17 @@ func TestResetPasswordHandler(t *testing.T) {
 		}
 
 		data := []byte(`{
-		"old_password": "wrongpassword",
-		"new_password": "newpassword123"
-	}`)
+			"old_password": "wrongpassword",
+			"new_password": "newpassword123",
+			"new_password_confirm": "newpassword123"
+		}`)
 
-		ctx := context.WithValue(context.Background(), "email", "john@example.com")
+		reqCtx := context.WithValue(ctx, "claims", &tokens.Claims{
+			UserID: 1,
+			Email:  "john@example.com",
+		})
 		req := httptest.NewRequest(http.MethodPost, "/auth/reset-password", bytes.NewBuffer(data))
-		req = req.WithContext(ctx)
+		req = req.WithContext(reqCtx)
 		rec := httptest.NewRecorder()
 
 		handler.ResetPasswordHandler(rec, req)
@@ -1229,6 +1211,7 @@ func TestResetPasswordHandler(t *testing.T) {
 	})
 
 	t.Run("returns 401 when user not found", func(t *testing.T) {
+		ctx := context.Background()
 		handler := &auth.Handler{
 			Store:    NewStubUserStore(),
 			OTPStore: NewStubOTPStore(),
@@ -1237,13 +1220,17 @@ func TestResetPasswordHandler(t *testing.T) {
 		}
 
 		data := []byte(`{
-		"old_password": "oldpassword",
-		"new_password": "newpassword123"
-	}`)
+			"old_password": "oldpassword",
+			"new_password": "newpassword123",
+			"new_password_confirm": "newpassword123"
+		}`)
 
-		ctx := context.WithValue(context.Background(), "email", "nonexistent@example.com")
+		reqCtx := context.WithValue(ctx, "claims", &tokens.Claims{
+			UserID: 999,
+			Email:  "nonexistent@example.com",
+		})
 		req := httptest.NewRequest(http.MethodPost, "/auth/reset-password", bytes.NewBuffer(data))
-		req = req.WithContext(ctx)
+		req = req.WithContext(reqCtx)
 		rec := httptest.NewRecorder()
 
 		handler.ResetPasswordHandler(rec, req)
@@ -1252,12 +1239,13 @@ func TestResetPasswordHandler(t *testing.T) {
 	})
 
 	t.Run("returns 500 when update fails", func(t *testing.T) {
+		ctx := context.Background()
 		store := NewStubUserStore()
 		store.Users = []database.User{
 			{
-				ID:           1,
-				Email:        "john@example.com",
-				PasswordHash: pgtype.Text{String: "oldpassword", Valid: true},
+				ID:       1,
+				Email:    "john@example.com",
+				Password: "oldpassword",
 			},
 		}
 		store.ShouldFailUpdate = true
@@ -1270,13 +1258,17 @@ func TestResetPasswordHandler(t *testing.T) {
 		}
 
 		data := []byte(`{
-		"old_password": "oldpassword",
-		"new_password": "newpassword123"
-	}`)
+			"old_password": "oldpassword",
+			"new_password": "newpassword123",
+			"new_password_confirm": "newpassword123"
+		}`)
 
-		ctx := context.WithValue(context.Background(), "email", "john@example.com")
+		reqCtx := context.WithValue(ctx, "claims", &tokens.Claims{
+			UserID: 1,
+			Email:  "john@example.com",
+		})
 		req := httptest.NewRequest(http.MethodPost, "/auth/reset-password", bytes.NewBuffer(data))
-		req = req.WithContext(ctx)
+		req = req.WithContext(reqCtx)
 		rec := httptest.NewRecorder()
 
 		handler.ResetPasswordHandler(rec, req)
