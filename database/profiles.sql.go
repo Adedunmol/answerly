@@ -7,6 +7,8 @@ package database
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createProfile = `-- name: CreateProfile :exec
@@ -17,4 +19,80 @@ VALUES ($1)
 func (q *Queries) CreateProfile(ctx context.Context, userID int64) error {
 	_, err := q.db.Exec(ctx, createProfile, userID)
 	return err
+}
+
+const getProfile = `-- name: GetProfile :one
+SELECT id, first_name, last_name, date_of_birth, gender, university, faculty, location, user_id, created_at, updated_at FROM profiles WHERE user_id = $1
+`
+
+func (q *Queries) GetProfile(ctx context.Context, userID int64) (Profile, error) {
+	row := q.db.QueryRow(ctx, getProfile, userID)
+	var i Profile
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.DateOfBirth,
+		&i.Gender,
+		&i.University,
+		&i.Faculty,
+		&i.Location,
+		&i.UserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateProfile = `-- name: UpdateProfile :one
+UPDATE profiles
+SET
+    first_name = COALESCE($1, first_name),
+    last_name = COALESCE($2, last_name),
+    date_of_birth = COALESCE($3, date_of_birth),
+    gender = COALESCE($4, gender),
+    university = COALESCE($5, university),
+    faculty = COALESCE($6, faculty),
+    location = COALESCE($7, location)
+WHERE user_id = $8
+RETURNING id, first_name, last_name, date_of_birth, gender, university, faculty, location, user_id, created_at, updated_at
+`
+
+type UpdateProfileParams struct {
+	FirstName   pgtype.Text
+	LastName    pgtype.Text
+	DateOfBirth pgtype.Date
+	Gender      NullGender
+	University  pgtype.Text
+	Faculty     pgtype.Text
+	Location    pgtype.Text
+	UserID      int64
+}
+
+func (q *Queries) UpdateProfile(ctx context.Context, arg UpdateProfileParams) (Profile, error) {
+	row := q.db.QueryRow(ctx, updateProfile,
+		arg.FirstName,
+		arg.LastName,
+		arg.DateOfBirth,
+		arg.Gender,
+		arg.University,
+		arg.Faculty,
+		arg.Location,
+		arg.UserID,
+	)
+	var i Profile
+	err := row.Scan(
+		&i.ID,
+		&i.FirstName,
+		&i.LastName,
+		&i.DateOfBirth,
+		&i.Gender,
+		&i.University,
+		&i.Faculty,
+		&i.Location,
+		&i.UserID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

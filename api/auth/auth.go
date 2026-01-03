@@ -639,8 +639,6 @@ func (h *Handler) ResetPasswordHandler(responseWriter http.ResponseWriter, reque
 	claims := request.Context().Value("claims").(*tokens.Claims)
 	email := claims.Email
 
-	log.Printf("%#v", claims)
-
 	if email == "" {
 		response := jsonutil.Response{
 			Status:  "error",
