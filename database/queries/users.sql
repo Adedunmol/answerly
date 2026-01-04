@@ -1,7 +1,7 @@
 
 -- name: CreateUser :one
-INSERT INTO users (email, password, role)
-VALUES ($1, $2, $3)
+INSERT INTO users (email, password, role, google_id, auth_provider)
+VALUES ($1, $2, $3, sqlc.narg(google_id), sqlc.narg(auth_provider))
 RETURNING *;
 
 -- name: GetUserByEmail :one

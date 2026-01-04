@@ -19,6 +19,7 @@ type CreateUserBody struct {
 	ConfirmPassword string `json:"password_confirmation" validate:"required,eqfield=Password"`
 	Email           string `json:"email" validate:"required,email"`
 	Role            string
+	GoogleID        string `json:"google_id"`
 }
 
 type LoginUserBody struct {
@@ -68,4 +69,8 @@ type ForgotPasswordBody struct {
 	Code               string `json:"code" validate:"required"`
 	NewPassword        string `json:"new_password" validate:"required"`
 	NewPasswordConfirm string `json:"new_password_confirm" validate:"required,eqfield=NewPassword"`
+}
+
+type GoogleAuthRequestBody struct {
+	IDToken string `json:"id_token"`
 }

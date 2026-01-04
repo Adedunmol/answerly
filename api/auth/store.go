@@ -42,10 +42,26 @@ func (r *Repository) CreateUser(ctx context.Context, body *CreateUserBody) (data
 	//q := r.queries.WithTx(executor)
 	//
 
+	var provider database.NullAuthProvider
+
+	if body.GoogleID != "" {
+		provider = database.NullAuthProvider{
+			AuthProvider: database.AuthProviderGoogle,
+			Valid:        true,
+		}
+	} else {
+		provider = database.NullAuthProvider{
+			AuthProvider: database.AuthProviderEmail,
+			Valid:        true,
+		}
+	}
+
 	data, err := r.queries.CreateUser(ctx, database.CreateUserParams{
-		Email:    body.Email,
-		Password: body.Password,
-		Role:     body.Role,
+		Email:        body.Email,
+		Password:     body.Password,
+		Role:         body.Role,
+		GoogleID:     pgtype.Text{String: body.GoogleID, Valid: len(body.GoogleID) > 0},
+		AuthProvider: provider,
 	})
 
 	if err != nil {

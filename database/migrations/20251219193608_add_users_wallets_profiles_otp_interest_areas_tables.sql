@@ -16,7 +16,7 @@ CREATE TABLE users (
     id BIGSERIAL PRIMARY KEY,
     email VARCHAR(255) UNIQUE NOT NULL,
     email_verified BOOLEAN DEFAULT false,
-    password VARCHAR(255) NOT NULL,
+    password VARCHAR(255),
     role varchar(64) NOT NULL DEFAULT 'user',
     google_id VARCHAR(255) UNIQUE,
     auth_provider auth_provider DEFAULT 'email',

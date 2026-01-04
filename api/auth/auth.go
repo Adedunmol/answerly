@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"github.com/Adedunmol/answerly/api/custom_errors"
 	"github.com/Adedunmol/answerly/api/jsonutil"
@@ -9,8 +10,10 @@ import (
 	"github.com/Adedunmol/answerly/api/profiles"
 	"github.com/Adedunmol/answerly/api/tokens"
 	"github.com/Adedunmol/answerly/api/wallets"
+	"github.com/Adedunmol/answerly/database"
 	"github.com/Adedunmol/answerly/queue"
 	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/api/idtoken"
 	"log"
 	"net/http"
 	"time"
@@ -184,7 +187,7 @@ func (h *Handler) CreateUserHandler(responseWriter http.ResponseWriter, request 
 		log.Printf("error enqueuing email task: %s", err)
 	}
 
-	_, refreshToken := h.Token.GenerateToken(int(user.ID), data.Email, user.EmailVerified.Bool, "user") // user.Verified // role
+	_, refreshToken := h.Token.GenerateToken(int(user.ID), data.Email, user.EmailVerified.Bool, user.Role) // user.Verified // role
 
 	updateUser := UpdateUserBody{RefreshToken: refreshToken}
 
@@ -212,7 +215,6 @@ func (h *Handler) LoginUserHandler(responseWriter http.ResponseWriter, request *
 
 	user, err := h.Store.FindUserByEmail(ctx, data.Email)
 
-	log.Printf("user: %#v", user)
 	if err != nil {
 		response := jsonutil.Response{Status: "error", Message: err.Error()}
 		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusUnauthorized)
@@ -781,6 +783,172 @@ func (h *Handler) RefreshTokenHandler(responseWriter http.ResponseWriter, reques
 
 	jsonutil.WriteJSONResponse(responseWriter, response, http.StatusOK)
 	return
+}
+
+func (h *Handler) GoogleSignUpHandler(responseWriter http.ResponseWriter, request *http.Request) {
+	ctx := context.Background()
+
+	data, err := jsonutil.UnmarshalJsonResponse[GoogleAuthRequestBody](request)
+	if err != nil {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: err.Error(),
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusBadRequest)
+		return
+	}
+
+	payload, err := verifyGoogleIDToken(data.IDToken)
+	if err != nil {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: err.Error(),
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusUnauthorized)
+		return
+	}
+
+	email := payload.Claims["email"].(string)
+	googleID := payload.Subject
+
+	user, err := h.Store.FindUserByEmail(context.Background(), email)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			q := request.URL.Query()
+
+			role := q.Get("role")
+
+			if role == "" {
+				role = "user"
+			}
+
+			if !allowedRoles[role] {
+				response := jsonutil.Response{
+					Status:  "error",
+					Message: "invalid role",
+				}
+				jsonutil.WriteJSONResponse(responseWriter, response, http.StatusBadRequest)
+				return
+			}
+			body := CreateUserBody{
+				Email:    email,
+				Role:     role,
+				GoogleID: googleID,
+			}
+
+			newUser, err := h.Store.CreateUser(ctx, &body)
+
+			if err != nil {
+				ok := errors.Is(err, custom_errors.ErrConflict)
+
+				if ok {
+					response := jsonutil.Response{
+						Status:  "error",
+						Message: err.Error(),
+					}
+					jsonutil.WriteJSONResponse(responseWriter, response, http.StatusConflict)
+					return
+				}
+
+				response := jsonutil.Response{
+					Status:  "error",
+					Message: err.Error(),
+				}
+				jsonutil.WriteJSONResponse(responseWriter, response, http.StatusInternalServerError)
+				return
+			}
+
+			_, err = h.WalletStore.CreateWallet(ctx, user.ID)
+			if err != nil {
+				response := jsonutil.Response{
+					Status:  "error",
+					Message: err.Error(),
+				}
+				jsonutil.WriteJSONResponse(responseWriter, response, http.StatusInternalServerError)
+				return
+			}
+
+			err = h.ProfileStore.CreateProfile(ctx, user.ID)
+			if err != nil {
+				response := jsonutil.Response{
+					Status:  "error",
+					Message: err.Error(),
+				}
+				jsonutil.WriteJSONResponse(responseWriter, response, http.StatusInternalServerError)
+				return
+			}
+
+			accessToken, refreshToken := h.Token.GenerateToken(int(user.ID), newUser.Email, newUser.EmailVerified.Bool, newUser.Role)
+
+			updateUser := UpdateUserBody{RefreshToken: refreshToken, Verified: true}
+
+			if err = h.Store.UpdateUser(ctx, int(newUser.ID), updateUser); err != nil {
+				response := jsonutil.Response{
+					Status:  "error",
+					Message: err.Error(),
+				}
+				jsonutil.WriteJSONResponse(responseWriter, response, http.StatusInternalServerError)
+				return
+			}
+
+			response := Response{
+				Status:  "Success",
+				Message: "User created successfully",
+				Data: struct {
+					User        database.User `json:"user"`
+					AccessToken string        `json:"access_token"`
+				}{
+					User:        newUser,
+					AccessToken: accessToken,
+				},
+			}
+
+			jsonutil.WriteJSONResponse(responseWriter, response, http.StatusCreated)
+			return
+		}
+
+		response := Response{
+			Status:  "error",
+			Message: err.Error(),
+		}
+
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusInternalServerError)
+		return
+	}
+
+	token, refreshToken := h.Token.GenerateToken(int(user.ID), user.Email, user.EmailVerified.Bool, user.Role)
+
+	updateUser := UpdateUserBody{RefreshToken: refreshToken}
+
+	if err = h.Store.UpdateUser(ctx, int(user.ID), updateUser); err != nil {
+		response := jsonutil.Response{Status: "error", Message: err.Error()}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusInternalServerError)
+		return
+	}
+
+	expires := time.Now().AddDate(0, 0, 7)
+
+	cookie := &http.Cookie{Name: "refresh_token", Value: refreshToken, Path: "/", Expires: expires, Secure: true, HttpOnly: true, MaxAge: 86400}
+
+	http.SetCookie(responseWriter, cookie)
+
+	response := Response{Status: "Success", Message: "User logged in", Data: map[string]interface{}{"token": token, "expiration": TokenExpiration}}
+
+	jsonutil.WriteJSONResponse(responseWriter, response, http.StatusOK)
+	return
+}
+
+func verifyGoogleIDToken(token string) (*idtoken.Payload, error) {
+	payload, err := idtoken.Validate(
+		context.Background(),
+		token,
+		"")
+
+	if err != nil {
+		return nil, err
+	}
+
+	return payload, nil
 }
 
 //
