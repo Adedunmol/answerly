@@ -1,11 +1,13 @@
 package tokens
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
 	"github.com/golang-jwt/jwt"
 	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/api/idtoken"
 	"math/big"
 	"os"
 	"time"
@@ -16,6 +18,7 @@ type TokenService interface {
 	ComparePasswords(storedPassword, candidatePassword string) bool
 	GenerateToken(userID int, email string, verified bool, role string) (string, string)
 	DecodeToken(tokenString string) (*Claims, error)
+	VerifyGoogleIDToken(token string) (*idtoken.Payload, error)
 }
 
 type Tokens struct{}
@@ -138,4 +141,17 @@ func (t *Tokens) DecodeToken(tokenString string) (*Claims, error) {
 	}
 
 	return claims, nil
+}
+
+func (t *Tokens) VerifyGoogleIDToken(token string) (*idtoken.Payload, error) {
+	payload, err := idtoken.Validate(
+		context.Background(),
+		token,
+		"")
+
+	if err != nil {
+		return nil, err
+	}
+
+	return payload, nil
 }

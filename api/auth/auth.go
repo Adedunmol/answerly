@@ -13,7 +13,6 @@ import (
 	"github.com/Adedunmol/answerly/database"
 	"github.com/Adedunmol/answerly/queue"
 	"golang.org/x/crypto/bcrypt"
-	"google.golang.org/api/idtoken"
 	"log"
 	"net/http"
 	"time"
@@ -798,7 +797,7 @@ func (h *Handler) GoogleSignUpHandler(responseWriter http.ResponseWriter, reques
 		return
 	}
 
-	payload, err := verifyGoogleIDToken(data.IDToken)
+	payload, err := h.Token.VerifyGoogleIDToken(data.IDToken)
 	if err != nil {
 		response := jsonutil.Response{
 			Status:  "error",
@@ -936,19 +935,6 @@ func (h *Handler) GoogleSignUpHandler(responseWriter http.ResponseWriter, reques
 
 	jsonutil.WriteJSONResponse(responseWriter, response, http.StatusOK)
 	return
-}
-
-func verifyGoogleIDToken(token string) (*idtoken.Payload, error) {
-	payload, err := idtoken.Validate(
-		context.Background(),
-		token,
-		"")
-
-	if err != nil {
-		return nil, err
-	}
-
-	return payload, nil
 }
 
 //
