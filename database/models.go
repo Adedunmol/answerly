@@ -120,6 +120,14 @@ type OtpVerification struct {
 	UpdatedAt pgtype.Timestamp
 }
 
+type Permission struct {
+	ID          int32
+	Name        string
+	Description pgtype.Text
+	CreatedAt   pgtype.Timestamp
+	UpdatedAt   pgtype.Timestamp
+}
+
 type Profile struct {
 	ID          int64
 	FirstName   pgtype.Text
@@ -134,11 +142,36 @@ type Profile struct {
 	UpdatedAt   pgtype.Timestamp
 }
 
+type Role struct {
+	ID        int64
+	Name      string
+	CreatedAt pgtype.Timestamp
+	UpdatedAt pgtype.Timestamp
+}
+
+type RolePermission struct {
+	RoleID       int32
+	PermissionID int32
+	CreatedAt    pgtype.Timestamp
+}
+
+type Transaction struct {
+	ID            int64
+	Amount        pgtype.Numeric
+	BalanceBefore pgtype.Numeric
+	BalanceAfter  pgtype.Numeric
+	Reference     pgtype.Text
+	Status        pgtype.Text
+	WalletID      pgtype.Int8
+	CreatedAt     pgtype.Timestamp
+	UpdatedAt     pgtype.Timestamp
+}
+
 type User struct {
 	ID            int64
 	Email         string
 	EmailVerified pgtype.Bool
-	Password      string
+	Password      pgtype.Text
 	Role          string
 	GoogleID      pgtype.Text
 	AuthProvider  NullAuthProvider

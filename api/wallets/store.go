@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/Adedunmol/answerly/database"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
 	"time"
 )
@@ -20,11 +21,12 @@ const UniqueViolationCode = "23505"
 
 type Repository struct {
 	queries *database.Queries
+	db      *pgxpool.Pool
 }
 
-func NewWalletStore(queries *database.Queries) *Repository {
+func NewWalletStore(pool *pgxpool.Pool, queries *database.Queries) *Repository {
 
-	return &Repository{queries: queries}
+	return &Repository{queries: queries, db: pool}
 }
 
 func (r *Repository) CreateWallet(ctx context.Context, userID int64) (database.Wallet, error) {
