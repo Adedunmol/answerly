@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/shopspring/decimal"
+	"google.golang.org/api/idtoken"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -46,9 +48,124 @@ func assertResponseMessage(t *testing.T, got map[string]interface{}, wantMessage
 // ============================================================================
 // Stubs
 // ============================================================================
+
+type StubWalletStore struct {
+	Wallets    map[int64]database.Wallet
+	ShouldFail bool
+}
+
+func NewStubWalletStore() *StubWalletStore {
+	return &StubWalletStore{
+		Wallets: make(map[int64]database.Wallet),
+	}
+}
+
+func (s *StubWalletStore) CreateWallet(ctx context.Context, userID int64) (database.Wallet, error) {
+	if s.ShouldFail {
+		return database.Wallet{}, errors.New("failed to create wallet")
+	}
+
+	wallet := database.Wallet{
+		ID:      int64(len(s.Wallets) + 1),
+		UserID:  userID,
+		Balance: pgtype.Numeric{Int: &decimal.NewFromInt(0)},
+	}
+
+	s.Wallets[userID] = wallet
+	return wallet, nil
+}
+
+func (s *StubWalletStore) GetWallet(ctx context.Context, userID int64) (database.Wallet, error) {
+	if s.ShouldFail {
+		return database.Wallet{}, errors.New("database error")
+	}
+
+	wallet, exists := s.Wallets[userID]
+	if !exists {
+		return database.Wallet{}, errors.New("wallet not found")
+	}
+
+	return wallet, nil
+}
+
+func (s *StubWalletStore) TopUpWallet(ctx context.Context, userID int64, amount decimal.Decimal) (database.Wallet, error) {
+	if s.ShouldFail {
+		return database.Wallet{}, errors.New("database error")
+	}
+
+	wallet, exists := s.Wallets[userID]
+	if !exists {
+		return database.Wallet{}, errors.New("wallet not found")
+	}
+
+	wallet.Balance = wallet.Balance.Add(amount)
+	s.Wallets[userID] = wallet
+	return wallet, nil
+}
+
+func (s *StubWalletStore) ChargeWallet(ctx context.Context, companyID int64, amount decimal.Decimal) (database.Wallet, error) {
+	if s.ShouldFail {
+		return database.Wallet{}, errors.New("database error")
+	}
+
+	wallet, exists := s.Wallets[companyID]
+	if !exists {
+		return database.Wallet{}, errors.New("wallet not found")
+	}
+
+	wallet.Balance = wallet.Balance.Sub(amount)
+	s.Wallets[companyID] = wallet
+	return wallet, nil
+}
+
+type StubProfileStore struct {
+	Profiles   map[int64]bool
+	ShouldFail bool
+}
+
+func NewStubProfileStore() *StubProfileStore {
+	return &StubProfileStore{
+		Profiles: make(map[int64]bool),
+	}
+}
+
+func (s *StubProfileStore) CreateProfile(ctx context.Context, userID int64) error {
+	if s.ShouldFail {
+		return errors.New("failed to create profile")
+	}
+
+	s.Profiles[userID] = true
+	return nil
+}
+
 type StubTokenService struct {
 	ShouldFailOTP   bool
 	ShouldFailToken bool
+	*StubTokenService
+	ShouldFailVerify bool
+	MockPayload      *idtoken.Payload
+}
+
+func (s *StubTokenService) VerifyGoogleIDToken(idToken string) (*idtoken.Payload, error) {
+	if s.ShouldFailVerify {
+		return nil, errors.New("invalid token")
+	}
+
+	if idToken == "invalid-token" {
+		return nil, errors.New("invalid token")
+	}
+
+	if s.MockPayload != nil {
+		return s.MockPayload, nil
+	}
+
+	// Default mock payload
+	return &idtoken.Payload{
+		Subject: "google-user-123",
+		Claims: map[string]interface{}{
+			"email": "john@example.com",
+		},
+	}, nil
 }
 
 func (s *StubTokenService) GenerateSecureOTP(length int) (string, error) {
@@ -1274,5 +1391,500 @@ func TestResetPasswordHandler(t *testing.T) {
 		handler.ResetPasswordHandler(rec, req)
 
 		assertResponseCode(t, rec.Code, http.StatusInternalServerError)
+	})
+}
+
+// ============================================================================
+// GoogleSignUpHandler Tests
+// ============================================================================
+
+func TestGoogleSignUpHandler(t *testing.T) {
+	t.Run("successfully creates new user with Google sign up", func(t *testing.T) {
+		store := NewStubUserStore()
+		walletStore := NewStubWalletStore()
+		profileStore := NewStubProfileStore()
+		tokenService := &StubTokenService{
+			MockPayload: &idtoken.Payload{
+				Subject: "google-123",
+				Claims: map[string]interface{}{
+					"email": "newuser@example.com",
+				},
+			},
+		}
+
+		handler := &auth.Handler{
+			Store:        store,
+			WalletStore:  walletStore,
+			ProfileStore: profileStore,
+			Token:        tokenService,
+		}
+
+		data := []byte(`{
+			"id_token": "valid-google-token"
+		}`)
+
+		req := httptest.NewRequest(http.MethodPost, "/auth/google/signup?role=user", bytes.NewBuffer(data))
+		rec := httptest.NewRecorder()
+
+		handler.GoogleSignUpHandler(rec, req)
+
+		var got map[string]interface{}
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+
+		assertResponseCode(t, rec.Code, http.StatusCreated)
+		assertResponseStatus(t, got, "Success")
+		assertResponseMessage(t, got, "User created successfully")
+
+		if len(store.Users) != 1 {
+			t.Errorf("expected 1 user in store, got %d", len(store.Users))
+		}
+
+		user := store.Users[0]
+		if user.Email != "newuser@example.com" {
+			t.Errorf("expected email 'newuser@example.com', got '%s'", user.Email)
+		}
+
+		if user.GoogleID.String != "google-123" {
+			t.Errorf("expected GoogleID 'google-123', got '%s'", user.GoogleID.String)
+		}
+
+		if len(walletStore.Wallets) != 1 {
+			t.Errorf("expected 1 wallet in store, got %d", len(walletStore.Wallets))
+		}
+
+		if len(profileStore.Profiles) != 1 {
+			t.Errorf("expected 1 profile in store, got %d", len(profileStore.Profiles))
+		}
+
+		responseData := got["data"].(map[string]interface{})
+		if responseData["access_token"] == nil {
+			t.Error("expected access_token in response")
+		}
+	})
+
+	t.Run("successfully logs in existing user with Google", func(t *testing.T) {
+		store := NewStubUserStore()
+		store.Users = []database.User{
+			{
+				ID:            1,
+				Email:         "existing@example.com",
+				GoogleID:      pgtype.Text{String: "google-123", Valid: true},
+				EmailVerified: pgtype.Bool{Bool: true, Valid: true},
+				Role:          pgtype.Text{String: "user", Valid: true},
+			},
+		}
+
+		walletStore := NewStubWalletStore()
+		profileStore := NewStubProfileStore()
+		tokenService := &StubTokenService{
+			MockPayload: &idtoken.Payload{
+				Subject: "google-123",
+				Claims: map[string]interface{}{
+					"email": "existing@example.com",
+				},
+			},
+		}
+
+		handler := &auth.Handler{
+			Store:        store,
+			WalletStore:  walletStore,
+			ProfileStore: profileStore,
+			Token:        tokenService,
+		}
+
+		data := []byte(`{
+			"id_token": "valid-google-token"
+		}`)
+
+		req := httptest.NewRequest(http.MethodPost, "/auth/google/signup", bytes.NewBuffer(data))
+		rec := httptest.NewRecorder()
+
+		handler.GoogleSignUpHandler(rec, req)
+
+		var got map[string]interface{}
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+
+		assertResponseCode(t, rec.Code, http.StatusOK)
+		assertResponseStatus(t, got, "Success")
+		assertResponseMessage(t, got, "User logged in")
+
+		cookies := rec.Result().Cookies()
+		found := false
+		for _, cookie := range cookies {
+			if cookie.Name == "refresh_token" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("expected refresh_token cookie to be set")
+		}
+
+		if len(store.Users) != 1 {
+			t.Errorf("expected 1 user in store, got %d", len(store.Users))
+		}
+	})
+
+	t.Run("returns 400 for invalid JSON", func(t *testing.T) {
+		handler := &auth.Handler{
+			Store:        NewStubUserStore(),
+			WalletStore:  NewStubWalletStore(),
+			ProfileStore: NewStubProfileStore(),
+			Token:        &StubTokenService{},
+		}
+
+		data := []byte(`{"id_token": "test"`) // Invalid JSON
+
+		req := httptest.NewRequest(http.MethodPost, "/auth/google/signup", bytes.NewBuffer(data))
+		rec := httptest.NewRecorder()
+
+		handler.GoogleSignUpHandler(rec, req)
+
+		var got map[string]interface{}
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+
+		assertResponseCode(t, rec.Code, http.StatusBadRequest)
+		assertResponseStatus(t, got, "error")
+	})
+
+	t.Run("returns 401 when Google token verification fails", func(t *testing.T) {
+		tokenService := &StubTokenService{
+			ShouldFailVerify: true,
+		}
+
+		handler := &auth.Handler{
+			Store:        NewStubUserStore(),
+			WalletStore:  NewStubWalletStore(),
+			ProfileStore: NewStubProfileStore(),
+			Token:        tokenService,
+		}
+
+		data := []byte(`{
+			"id_token": "invalid-token"
+		}`)
+
+		req := httptest.NewRequest(http.MethodPost, "/auth/google/signup", bytes.NewBuffer(data))
+		rec := httptest.NewRecorder()
+
+		handler.GoogleSignUpHandler(rec, req)
+
+		var got map[string]interface{}
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+
+		assertResponseCode(t, rec.Code, http.StatusUnauthorized)
+		assertResponseStatus(t, got, "error")
+	})
+
+	t.Run("returns 400 for invalid role", func(t *testing.T) {
+		tokenService := &StubTokenService{
+			MockPayload: &idtoken.Payload{
+				Subject: "google-123",
+				Claims: map[string]interface{}{
+					"email": "newuser@example.com",
+				},
+			},
+		}
+
+		handler := &auth.Handler{
+			Store:        NewStubUserStore(),
+			WalletStore:  NewStubWalletStore(),
+			ProfileStore: NewStubProfileStore(),
+			Token:        tokenService,
+		}
+
+		data := []byte(`{
+			"id_token": "valid-google-token"
+		}`)
+
+		req := httptest.NewRequest(http.MethodPost, "/auth/google/signup?role=invalid_role", bytes.NewBuffer(data))
+		rec := httptest.NewRecorder()
+
+		handler.GoogleSignUpHandler(rec, req)
+
+		var got map[string]interface{}
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+
+		assertResponseCode(t, rec.Code, http.StatusBadRequest)
+		assertResponseStatus(t, got, "error")
+		assertResponseMessage(t, got, "invalid role")
+	})
+
+	t.Run("returns 409 when user creation returns conflict error", func(t *testing.T) {
+		store := NewStubUserStore()
+		store.Users = []database.User{
+			{ID: 1, Email: "duplicate@example.com"},
+		}
+
+		tokenService := &StubTokenService{
+			MockPayload: &idtoken.Payload{
+				Subject: "google-123",
+				Claims: map[string]interface{}{
+					"email": "duplicate@example.com",
+				},
+			},
+		}
+
+		handler := &auth.Handler{
+			Store:        store,
+			WalletStore:  NewStubWalletStore(),
+			ProfileStore: NewStubProfileStore(),
+			Token:        tokenService,
+		}
+
+		data := []byte(`{
+			"id_token": "valid-google-token"
+		}`)
+
+		req := httptest.NewRequest(http.MethodPost, "/auth/google/signup", bytes.NewBuffer(data))
+		rec := httptest.NewRecorder()
+
+		handler.GoogleSignUpHandler(rec, req)
+
+		var got map[string]interface{}
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+
+		assertResponseCode(t, rec.Code, http.StatusConflict)
+		assertResponseStatus(t, got, "error")
+	})
+
+	t.Run("returns 500 when user creation fails with database error", func(t *testing.T) {
+		store := NewStubUserStore()
+		store.ShouldFailCreate = true
+
+		tokenService := &StubTokenService{
+			MockPayload: &idtoken.Payload{
+				Subject: "google-123",
+				Claims: map[string]interface{}{
+					"email": "newuser@example.com",
+				},
+			},
+		}
+
+		handler := &auth.Handler{
+			Store:        store,
+			WalletStore:  NewStubWalletStore(),
+			ProfileStore: NewStubProfileStore(),
+			Token:        tokenService,
+		}
+
+		data := []byte(`{
+			"id_token": "valid-google-token"
+		}`)
+
+		req := httptest.NewRequest(http.MethodPost, "/auth/google/signup", bytes.NewBuffer(data))
+		rec := httptest.NewRecorder()
+
+		handler.GoogleSignUpHandler(rec, req)
+
+		assertResponseCode(t, rec.Code, http.StatusInternalServerError)
+	})
+
+	t.Run("returns 500 when wallet creation fails", func(t *testing.T) {
+		walletStore := NewStubWalletStore()
+		walletStore.ShouldFail = true
+
+		tokenService := &StubTokenService{
+			MockPayload: &idtoken.Payload{
+				Subject: "google-123",
+				Claims: map[string]interface{}{
+					"email": "newuser@example.com",
+				},
+			},
+		}
+
+		handler := &auth.Handler{
+			Store:        NewStubUserStore(),
+			WalletStore:  walletStore,
+			ProfileStore: NewStubProfileStore(),
+			Token:        tokenService,
+		}
+
+		data := []byte(`{
+			"id_token": "valid-google-token"
+		}`)
+
+		req := httptest.NewRequest(http.MethodPost, "/auth/google/signup", bytes.NewBuffer(data))
+		rec := httptest.NewRecorder()
+
+		handler.GoogleSignUpHandler(rec, req)
+
+		assertResponseCode(t, rec.Code, http.StatusInternalServerError)
+	})
+
+	t.Run("returns 500 when profile creation fails", func(t *testing.T) {
+		profileStore := NewStubProfileStore()
+		profileStore.ShouldFail = true
+
+		tokenService := &StubTokenService{
+			MockPayload: &idtoken.Payload{
+				Subject: "google-123",
+				Claims: map[string]interface{}{
+					"email": "newuser@example.com",
+				},
+			},
+		}
+
+		handler := &auth.Handler{
+			Store:        NewStubUserStore(),
+			WalletStore:  NewStubWalletStore(),
+			ProfileStore: profileStore,
+			Token:        tokenService,
+		}
+
+		data := []byte(`{
+			"id_token": "valid-google-token"
+		}`)
+
+		req := httptest.NewRequest(http.MethodPost, "/auth/google/signup", bytes.NewBuffer(data))
+		rec := httptest.NewRecorder()
+
+		handler.GoogleSignUpHandler(rec, req)
+
+		assertResponseCode(t, rec.Code, http.StatusInternalServerError)
+	})
+
+	t.Run("returns 500 when update user fails for new user", func(t *testing.T) {
+		store := NewStubUserStore()
+		store.ShouldFailUpdate = true
+
+		tokenService := &StubTokenService{
+			MockPayload: &idtoken.Payload{
+				Subject: "google-123",
+				Claims: map[string]interface{}{
+					"email": "newuser@example.com",
+				},
+			},
+		}
+
+		handler := &auth.Handler{
+			Store:        store,
+			WalletStore:  NewStubWalletStore(),
+			ProfileStore: NewStubProfileStore(),
+			Token:        tokenService,
+		}
+
+		data := []byte(`{
+			"id_token": "valid-google-token"
+		}`)
+
+		req := httptest.NewRequest(http.MethodPost, "/auth/google/signup", bytes.NewBuffer(data))
+		rec := httptest.NewRecorder()
+
+		handler.GoogleSignUpHandler(rec, req)
+
+		assertResponseCode(t, rec.Code, http.StatusInternalServerError)
+	})
+
+	t.Run("returns 500 when update user fails for existing user", func(t *testing.T) {
+		store := NewStubUserStore()
+		store.Users = []database.User{
+			{
+				ID:            1,
+				Email:         "existing@example.com",
+				GoogleID:      pgtype.Text{String: "google-123", Valid: true},
+				EmailVerified: pgtype.Bool{Bool: true, Valid: true},
+				Role:          "user",
+			},
+		}
+		store.ShouldFailUpdate = true
+
+		tokenService := &StubTokenService{
+			MockPayload: &idtoken.Payload{
+				Subject: "google-123",
+				Claims: map[string]interface{}{
+					"email": "existing@example.com",
+				},
+			},
+		}
+
+		handler := &auth.Handler{
+			Store:        store,
+			WalletStore:  NewStubWalletStore(),
+			ProfileStore: NewStubProfileStore(),
+			Token:        tokenService,
+		}
+
+		data := []byte(`{
+			"id_token": "valid-google-token"
+		}`)
+
+		req := httptest.NewRequest(http.MethodPost, "/auth/google/signup", bytes.NewBuffer(data))
+		rec := httptest.NewRecorder()
+
+		handler.GoogleSignUpHandler(rec, req)
+
+		assertResponseCode(t, rec.Code, http.StatusInternalServerError)
+	})
+
+	t.Run("creates user with company role", func(t *testing.T) {
+		tokenService := &StubTokenService{
+			MockPayload: &idtoken.Payload{
+				Subject: "google-123",
+				Claims: map[string]interface{}{
+					"email": "company@example.com",
+				},
+			},
+		}
+
+		handler := &auth.Handler{
+			Store:        NewStubUserStore(),
+			WalletStore:  NewStubWalletStore(),
+			ProfileStore: NewStubProfileStore(),
+			Token:        tokenService,
+		}
+
+		data := []byte(`{
+			"id_token": "valid-google-token"
+		}`)
+
+		req := httptest.NewRequest(http.MethodPost, "/auth/google/signup?role=company", bytes.NewBuffer(data))
+		rec := httptest.NewRecorder()
+
+		handler.GoogleSignUpHandler(rec, req)
+
+		var got map[string]interface{}
+		_ = json.Unmarshal(rec.Body.Bytes(), &got)
+
+		assertResponseCode(t, rec.Code, http.StatusCreated)
+		assertResponseStatus(t, got, "Success")
+	})
+
+	t.Run("defaults to user role when no role specified", func(t *testing.T) {
+		store := NewStubUserStore()
+		tokenService := &StubTokenService{
+			MockPayload: &idtoken.Payload{
+				Subject: "google-123",
+				Claims: map[string]interface{}{
+					"email": "newuser@example.com",
+				},
+			},
+		}
+
+		handler := &auth.Handler{
+			Store:        store,
+			WalletStore:  NewStubWalletStore(),
+			ProfileStore: NewStubProfileStore(),
+			Token:        tokenService,
+		}
+
+		data := []byte(`{
+			"id_token": "valid-google-token"
+		}`)
+
+		req := httptest.NewRequest(http.MethodPost, "/auth/google/signup", bytes.NewBuffer(data))
+		rec := httptest.NewRecorder()
+
+		handler.GoogleSignUpHandler(rec, req)
+
+		assertResponseCode(t, rec.Code, http.StatusCreated)
+
+		if len(store.Users) != 1 {
+			t.Errorf("expected 1 user in store, got %d", len(store.Users))
+		}
+
+		user := store.Users[0]
+		if user.Role != "user" {
+			t.Errorf("expected role 'user', got '%s'", user.Role)
+		}
 	})
 }
