@@ -12,7 +12,7 @@ import (
 
 type Store interface {
 	CreateWallet(ctx context.Context, userID int64) (database.Wallet, error)
-	GetWallet(ctx context.Context, userID int64) (database.Wallet, error)
+	GetWallet(ctx context.Context, userID int64) (WalletWithTransactions, error)
 	TopUpWallet(ctx context.Context, userID int64, amount decimal.Decimal) (database.Wallet, error)
 	ChargeWallet(ctx context.Context, companyID int64, amount decimal.Decimal) (database.Wallet, error)
 }
@@ -50,16 +50,52 @@ func (r *Repository) CreateWallet(ctx context.Context, userID int64) (database.W
 	return wallet, nil
 }
 
-func (r *Repository) GetWallet(ctx context.Context, userID int64) (database.Wallet, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func (r *Repository) GetWallet(ctx context.Context, userID int64) (WalletWithTransactions, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	wallet, err := r.queries.GetWallet(ctx, userID)
+	rows, err := r.queries.GetWalletWithTransactions(ctx, userID)
 	if err != nil {
-		return database.Wallet{}, fmt.Errorf("error getting wallet: %v", err)
+		return WalletWithTransactions{}, fmt.Errorf("error getting wallet with transactions: %v", err)
 	}
 
-	return wallet, nil
+	if len(rows) == 0 {
+		return WalletWithTransactions{}, fmt.Errorf("wallet not found")
+	}
+
+	// First row contains wallet data
+	firstRow := rows[0]
+	result := WalletWithTransactions{
+		Wallet: database.Wallet{
+			ID:        firstRow.ID,
+			Balance:   firstRow.Balance,
+			UserID:    firstRow.UserID,
+			CreatedAt: firstRow.CreatedAt,
+			UpdatedAt: firstRow.UpdatedAt,
+		},
+		Transactions: make([]database.Transaction, 0),
+	}
+
+	// Collect all transactions
+	for _, row := range rows {
+		// Only add transaction if it exists (LEFT JOIN might return NULL)
+		if row.TransactionID.Valid {
+			transaction := database.Transaction{
+				ID:            row.TransactionID.Int64,
+				Amount:        row.TransactionAmount,
+				BalanceBefore: row.TransactionBalanceBefore,
+				BalanceAfter:  row.TransactionBalanceAfter,
+				Reference:     row.TransactionReference,
+				Status:        row.TransactionStatus,
+				WalletID:      row.TransactionWalletID,
+				CreatedAt:     row.TransactionCreatedAt,
+				UpdatedAt:     row.TransactionUpdatedAt,
+			}
+			result.Transactions = append(result.Transactions, transaction)
+		}
+	}
+
+	return result, nil
 }
 
 func (r *Repository) TopUpWallet(ctx context.Context, userID int64, amount decimal.Decimal) (database.Wallet, error) {

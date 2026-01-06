@@ -1,6 +1,7 @@
 package wallets
 
 import (
+	"github.com/Adedunmol/answerly/database"
 	"github.com/shopspring/decimal"
 	"time"
 )
@@ -30,6 +31,6 @@ type Transaction struct {
 }
 
 type WalletWithTransactions struct {
-	Wallet       Wallet
-	Transactions []Transaction
+	Wallet       database.Wallet        `json:"wallet"`
+	Transactions []database.Transaction `json:"transactions"`
 }
