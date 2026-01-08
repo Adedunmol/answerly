@@ -34,3 +34,13 @@ type WalletWithTransactions struct {
 	Wallet       database.Wallet        `json:"wallet"`
 	Transactions []database.Transaction `json:"transactions"`
 }
+
+type WithdrawBody struct {
+	Amount        decimal.Decimal `json:"amount" validate:"required"`
+	Method        string          `json:"method" validate:"required,oneof=airtime bank_account"`
+	AccountNumber string          `json:"account_number"`
+	Bank          string          `json:"bank"`
+	PhoneNumber   string          `json:"phone_number"`
+	Network       string          `json:"network"`
+	Save          bool            `json:"save"`
+}

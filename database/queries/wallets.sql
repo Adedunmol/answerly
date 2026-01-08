@@ -39,3 +39,7 @@ FROM wallets w
 LEFT JOIN transactions t ON w.id = t.wallet_id
 WHERE w.user_id = $1
 ORDER BY t.created_at DESC;
+
+-- name: CreateTransaction :exec
+INSERT INTO transactions (amount, balance_before, balance_after, reference, status, wallet_id, type)
+VALUES (sqlc.arg(amount), sqlc.arg(balance_before), sqlc.arg(balance_after), sqlc.arg(reference), sqlc.arg(status), sqlc.arg(wallet_id), sqlc.arg(type));

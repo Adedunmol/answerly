@@ -91,6 +91,8 @@ func getErrorMessage(e validator.FieldError) string {
 		return fmt.Sprintf("%s must be greater than or equal to %s", e.Field(), e.Param())
 	case "lte":
 		return fmt.Sprintf("%s must be less than or equal to %s", e.Field(), e.Param())
+	case "oneof":
+		return fmt.Sprintf("%s must be one of %s", e.Field(), e.Param())
 	default:
 		return fmt.Sprintf("%s is invalid", e.Field())
 	}

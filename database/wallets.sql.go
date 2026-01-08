@@ -36,6 +36,34 @@ func (q *Queries) ChargeWallet(ctx context.Context, arg ChargeWalletParams) (Wal
 	return i, err
 }
 
+const createTransaction = `-- name: CreateTransaction :exec
+INSERT INTO transactions (amount, balance_before, balance_after, reference, status, wallet_id, type)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type CreateTransactionParams struct {
+	Amount        pgtype.Numeric
+	BalanceBefore pgtype.Numeric
+	BalanceAfter  pgtype.Numeric
+	Reference     pgtype.Text
+	Status        pgtype.Text
+	WalletID      pgtype.Int8
+	Type          pgtype.Text
+}
+
+func (q *Queries) CreateTransaction(ctx context.Context, arg CreateTransactionParams) error {
+	_, err := q.db.Exec(ctx, createTransaction,
+		arg.Amount,
+		arg.BalanceBefore,
+		arg.BalanceAfter,
+		arg.Reference,
+		arg.Status,
+		arg.WalletID,
+		arg.Type,
+	)
+	return err
+}
+
 const createWallet = `-- name: CreateWallet :one
 INSERT INTO wallets (balance, user_id)
 VALUES ($1, $2)

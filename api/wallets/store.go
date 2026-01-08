@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"github.com/Adedunmol/answerly/database"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/shopspring/decimal"
@@ -15,6 +16,7 @@ type Store interface {
 	GetWallet(ctx context.Context, userID int64) (WalletWithTransactions, error)
 	TopUpWallet(ctx context.Context, userID int64, amount decimal.Decimal) (database.Wallet, error)
 	ChargeWallet(ctx context.Context, companyID int64, amount decimal.Decimal) (database.Wallet, error)
+	CreateTransaction(ctx context.Context, walletID int64, amount decimal.Decimal, txType string) error
 }
 
 const UniqueViolationCode = "23505"
@@ -138,4 +140,48 @@ func (r *Repository) ChargeWallet(ctx context.Context, userID int64, amount deci
 	}
 
 	return wallet, nil
+}
+
+func (r *Repository) CreateTransaction(ctx context.Context, walletID int64, amount decimal.Decimal, txType string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	wallet, err := r.queries.GetWallet(ctx, walletID)
+	if err != nil {
+		return fmt.Errorf("error getting wallet: %v", err)
+	}
+
+	var walletBalance decimal.Decimal
+	err = walletBalance.Scan(wallet.Balance)
+	if err != nil {
+		return fmt.Errorf("error scanning wallet balance: %v", err)
+	}
+
+	balanceAfter := walletBalance.Sub(amount)
+
+	balanceAfterCast := pgtype.Numeric{}
+	err = balanceAfterCast.Scan(balanceAfter.String())
+	if err != nil {
+		return fmt.Errorf("error while scanning balance after: %v", err)
+	}
+
+	amountCast := pgtype.Numeric{}
+	err = amountCast.Scan(amount.String())
+	if err != nil {
+		return fmt.Errorf("error while scanning amount: %v", err)
+	}
+
+	err = r.queries.CreateTransaction(ctx, database.CreateTransactionParams{
+		Amount:        amountCast,
+		BalanceBefore: wallet.Balance,
+		BalanceAfter:  balanceAfterCast,
+		Reference:     pgtype.Text{String: uuid.New().String(), Valid: true},
+		Status:        pgtype.Text{String: "pending", Valid: true},
+		WalletID:      pgtype.Int8{Int64: walletID, Valid: true},
+		Type:          pgtype.Text{String: txType, Valid: true},
+	})
+	if err != nil {
+		return fmt.Errorf("error creating transaction: %v", err)
+	}
+	return nil
 }

@@ -108,3 +108,122 @@ func (h *Handler) TopUpWalletHandler(responseWriter http.ResponseWriter, request
 	jsonutil.WriteJSONResponse(responseWriter, response, http.StatusOK)
 	return
 }
+
+func (h *Handler) WithdrawFromWalletHandler(responseWriter http.ResponseWriter, request *http.Request) {
+	ctx := context.Background()
+
+	body, err := jsonutil.UnmarshalJsonResponse[WithdrawBody](request)
+	if err != nil {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: err.Error(),
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusBadRequest)
+		return
+	}
+
+	if body.Amount.LessThanOrEqual(decimal.Zero) {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: "amount must be greater than zero",
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusBadRequest)
+		return
+	}
+
+	claims := request.Context().Value("claims").(*tokens.Claims)
+	userID := claims.UserID
+
+	if userID == 0 {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: "unauthorized",
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusUnauthorized)
+		return
+	}
+
+	wallet, err := h.Store.GetWallet(ctx, int64(userID))
+	if err != nil {
+		if errors.Is(err, custom_errors.ErrNotFound) {
+			response := jsonutil.Response{
+				Status:  "error",
+				Message: err.Error(),
+			}
+			jsonutil.WriteJSONResponse(responseWriter, response, http.StatusNotFound)
+			return
+		}
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: err.Error(),
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusInternalServerError)
+		return
+	}
+
+	var dec decimal.Decimal
+	err = dec.Scan(wallet.Wallet.Balance)
+	if err != nil {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: "internal server error",
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusInternalServerError)
+		return
+	}
+
+	if dec.LessThan(body.Amount) {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: "insufficient balance",
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusBadRequest)
+		return
+	}
+
+	if body.Save {
+		// create an entry for the details in the db (unique account number)
+	}
+
+	switch body.Method {
+	case "airtime":
+		// create transaction entry
+		err = h.Store.CreateTransaction(ctx, wallet.Wallet.ID, body.Amount, "airtime")
+		if err != nil {
+			response := jsonutil.Response{
+				Status:  "error",
+				Message: err.Error(),
+			}
+			jsonutil.WriteJSONResponse(responseWriter, response, http.StatusInternalServerError)
+			return
+		}
+
+		// perform necessary operations
+
+		jsonutil.WriteJSONResponse(responseWriter, struct{}{}, http.StatusOK)
+		return
+	case "bank_transfer":
+		// create transaction entry
+		err = h.Store.CreateTransaction(ctx, wallet.Wallet.ID, body.Amount, "bank_transfer")
+		if err != nil {
+			response := jsonutil.Response{
+				Status:  "error",
+				Message: err.Error(),
+			}
+			jsonutil.WriteJSONResponse(responseWriter, response, http.StatusInternalServerError)
+			return
+		}
+
+		// perform necessary operations
+
+		jsonutil.WriteJSONResponse(responseWriter, struct{}{}, http.StatusOK)
+		return
+	default:
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: "invalid method",
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusBadRequest)
+		return
+	}
+}

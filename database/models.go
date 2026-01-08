@@ -163,6 +163,7 @@ type Transaction struct {
 	Reference     pgtype.Text
 	Status        pgtype.Text
 	WalletID      pgtype.Int8
+	Type          pgtype.Text
 	CreatedAt     pgtype.Timestamp
 	UpdatedAt     pgtype.Timestamp
 }
