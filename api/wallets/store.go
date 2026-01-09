@@ -17,6 +17,7 @@ type Store interface {
 	TopUpWallet(ctx context.Context, userID int64, amount decimal.Decimal) (database.Wallet, error)
 	ChargeWallet(ctx context.Context, companyID int64, amount decimal.Decimal) (database.Wallet, error)
 	CreateTransaction(ctx context.Context, walletID int64, amount decimal.Decimal, txType string) error
+	CreatePaymentMethod(ctx context.Context, body PaymentMethodBody) error
 }
 
 const UniqueViolationCode = "23505"
@@ -183,5 +184,24 @@ func (r *Repository) CreateTransaction(ctx context.Context, walletID int64, amou
 	if err != nil {
 		return fmt.Errorf("error creating transaction: %v", err)
 	}
+	return nil
+}
+
+func (r *Repository) CreatePaymentMethod(ctx context.Context, body PaymentMethodBody) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	err := r.queries.CreatePaymentMethod(ctx, database.CreatePaymentMethodParams{
+		UserID:        body.UserID,
+		Type:          body.Type,
+		Provider:      pgtype.Text{String: body.Provider, Valid: len(body.Provider) > 0},
+		AccountName:   pgtype.Text{String: body.AccountName, Valid: len(body.AccountName) > 0},
+		AccountNumber: pgtype.Text{String: body.AccountNumber, Valid: len(body.AccountNumber) > 0},
+		PhoneNumber:   pgtype.Text{String: body.PhoneNumber, Valid: len(body.PhoneNumber) > 0},
+	})
+	if err != nil {
+		return fmt.Errorf("error creating payment method: %v", err)
+	}
+
 	return nil
 }

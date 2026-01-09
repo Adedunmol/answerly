@@ -120,6 +120,19 @@ type OtpVerification struct {
 	UpdatedAt pgtype.Timestamp
 }
 
+type PaymentMethod struct {
+	ID            int64
+	UserID        int64
+	Type          string
+	Provider      pgtype.Text
+	AccountName   pgtype.Text
+	AccountNumber pgtype.Text
+	PhoneNumber   pgtype.Text
+	IsDefault     pgtype.Bool
+	CreatedAt     pgtype.Timestamp
+	UpdatedAt     pgtype.Timestamp
+}
+
 type Permission struct {
 	ID          int32
 	Name        string

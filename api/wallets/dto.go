@@ -44,3 +44,12 @@ type WithdrawBody struct {
 	Network       string          `json:"network"`
 	Save          bool            `json:"save"`
 }
+
+type PaymentMethodBody struct {
+	UserID        int64
+	Type          string
+	Provider      string
+	AccountName   string
+	AccountNumber string
+	PhoneNumber   string
+}

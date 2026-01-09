@@ -182,7 +182,23 @@ func (h *Handler) WithdrawFromWalletHandler(responseWriter http.ResponseWriter, 
 	}
 
 	if body.Save {
-		// create an entry for the details in the db (unique account number)
+		// create an entry for the details in the db (unique account number, phone number)
+		err = h.Store.CreatePaymentMethod(ctx, PaymentMethodBody{
+			UserID:        int64(userID),
+			Type:          body.Method,
+			Provider:      "",
+			AccountName:   "",
+			AccountNumber: body.AccountNumber,
+			PhoneNumber:   body.PhoneNumber,
+		})
+		if err != nil && !errors.Is(err, custom_errors.ErrConflict) {
+			response := jsonutil.Response{
+				Status:  "error",
+				Message: err.Error(),
+			}
+			jsonutil.WriteJSONResponse(responseWriter, response, http.StatusInternalServerError)
+			return
+		}
 	}
 
 	switch body.Method {
