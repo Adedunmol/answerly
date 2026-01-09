@@ -19,7 +19,7 @@ RETURNING id, email, email_verified, password, role, google_id, auth_provider, r
 
 type CreateUserParams struct {
 	Email        string
-	Password     string
+	Password     pgtype.Text
 	Role         string
 	GoogleID     pgtype.Text
 	AuthProvider NullAuthProvider

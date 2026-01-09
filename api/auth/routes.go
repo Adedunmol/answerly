@@ -19,7 +19,7 @@ func SetupRoutes(r *chi.Mux, queue queue.Queue, db *pgxpool.Pool, queries *datab
 	store := NewUserStore(queries, db)
 	tokenService := tokens.NewTokenService()
 	otpStore := otp.NewOTPStore(queries, tokenService)
-	walletService := wallets.NewWalletStore(queries)
+	walletService := wallets.NewWalletStore(db, queries)
 	profileService := profiles.NewProfileStore(queries)
 
 	handler := Handler{
