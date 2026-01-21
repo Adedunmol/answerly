@@ -932,30 +932,155 @@ func (h *Handler) SaveAnswerHandler(responseWriter http.ResponseWriter, request 
 	jsonutil.WriteJSONResponse(responseWriter, response, http.StatusOK)
 }
 
-//
-//func (h *Handler) SaveAnswersHandler(responseWriter http.ResponseWriter, request *http.Request) {
-//	ctx := context.Background()
-//
-//	claims := request.Context().Value("claims").(*tokens.Claims)
-//	userID := claims.UserID
-//
-//	if userID == 0 {
-//		response := jsonutil.Response{
-//			Status:  "error",
-//			Message: "unauthorized",
-//		}
-//		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusUnauthorized)
-//		return
-//	}
-//
-//	data, err := jsonutil.UnmarshalJsonResponse[SaveAnswersBody](request)
-//	if err != nil {
-//		response := jsonutil.Response{
-//			Status:  "error",
-//			Message: err.Error(),
-//		}
-//		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusBadRequest)
-//		return
-//	}
-//
-//	var
+func (h *Handler) SaveAnswersHandler(responseWriter http.ResponseWriter, request *http.Request) {
+	ctx := context.Background()
+
+	claims := request.Context().Value("claims").(*tokens.Claims)
+	userID := claims.UserID
+
+	if userID == 0 {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: "unauthorized",
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusUnauthorized)
+		return
+	}
+
+	data, err := jsonutil.UnmarshalJsonResponse[SaveAnswersParams](request)
+	if err != nil {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: err.Error(),
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusBadRequest)
+		return
+	}
+
+	var params []SaveAnswerParams
+	for _, answer := range data.Answers {
+		params = append(params, SaveAnswerParams{
+			UserSurveyResponseID: answer.UserSurveyResponseID,
+			QuestionID:           answer.QuestionID,
+			AnswerText:           answer.AnswerText,
+			SelectedOptionIDs:    answer.SelectedOptionIDs,
+		})
+	}
+	answers, err := h.Store.SaveAnswers(ctx, params)
+	if err != nil {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: err.Error(),
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusInternalServerError)
+		return
+	}
+
+	response := jsonutil.Response{
+		Status:  "success",
+		Message: "answers saved successfully",
+		Data:    answers,
+	}
+	jsonutil.WriteJSONResponse(responseWriter, response, http.StatusOK)
+}
+
+func (h *Handler) GetAnswersByUserSurveyHandler(responseWriter http.ResponseWriter, request *http.Request) {
+	ctx := context.Background()
+	claims := request.Context().Value("claims").(*tokens.Claims)
+	userID := claims.UserID
+
+	if userID == 0 {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: "unauthorized",
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusUnauthorized)
+		return
+	}
+
+	userSurveyResponseIDStr := chi.URLParam(request, "userSurveyResponseID")
+	userSurveyResponseID, err := strconv.ParseInt(userSurveyResponseIDStr, 10, 64)
+	if err != nil {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: "invalid user survey response ID",
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusBadRequest)
+		return
+	}
+
+	answers, err := h.Store.GetAnswersByUserSurveyResponse(ctx, userSurveyResponseID)
+	if err != nil {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: err.Error(),
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusInternalServerError)
+		return
+	}
+
+	response := jsonutil.Response{
+		Status:  "success",
+		Message: "answers retrieved successfully",
+		Data:    answers,
+	}
+	jsonutil.WriteJSONResponse(responseWriter, response, http.StatusOK)
+}
+func (h *Handler) UpdateAnswerHandler(responseWriter http.ResponseWriter, request *http.Request) {
+	ctx := context.Background()
+	claims := request.Context().Value("claims").(*tokens.Claims)
+	userID := claims.UserID
+
+	if userID == 0 {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: "unauthorized",
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusUnauthorized)
+		return
+	}
+
+	answerIDStr := chi.URLParam(request, "answerID")
+	answerID, err := strconv.ParseInt(answerIDStr, 10, 64)
+	if err != nil {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: "invalid answer ID",
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusBadRequest)
+		return
+	}
+
+	data, err := jsonutil.UnmarshalJsonResponse[UpdateAnswerParams](request)
+	if err != nil {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: err.Error(),
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusBadRequest)
+		return
+	}
+
+	params := UpdateAnswerParams{
+		ID:                answerID,
+		AnswerText:        data.AnswerText,
+		SelectedOptionIDs: data.SelectedOptionIDs,
+	}
+
+	answer, err := h.Store.UpdateAnswer(ctx, params)
+	if err != nil {
+		response := jsonutil.Response{
+			Status:  "error",
+			Message: err.Error(),
+		}
+		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusInternalServerError)
+		return
+	}
+
+	response := jsonutil.Response{
+		Status:  "success",
+		Message: "answer updated successfully",
+		Data:    answer,
+	}
+	jsonutil.WriteJSONResponse(responseWriter, response, http.StatusOK)
+}

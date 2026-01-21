@@ -1,6 +1,9 @@
 package surveys
 
-import "github.com/shopspring/decimal"
+import (
+	"github.com/Adedunmol/answerly/database"
+	"github.com/shopspring/decimal"
+)
 
 // Parameter structs
 type CreateSurveyParams struct {
@@ -94,4 +97,8 @@ type UserSurveyWithDetails struct {
 	Survey              database.Survey
 	UserSurveyResponse  database.UserSurveyResponse
 	PercentageCompleted decimal.Decimal
+}
+
+type SaveAnswersParams struct {
+	Answers []SaveAnswerParams `json:"answers"`
 }
