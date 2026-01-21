@@ -96,6 +96,16 @@ func (ns NullGender) Value() (driver.Value, error) {
 	return string(ns.Gender), nil
 }
 
+type AnswerResponse struct {
+	ID                   int64
+	UserSurveyResponseID int64
+	QuestionID           int64
+	AnswerText           pgtype.Text
+	SelectedOptionIds    []int64
+	AnsweredAt           pgtype.Timestamp
+	UpdatedAt            pgtype.Timestamp
+}
+
 type Field struct {
 	ID        int64
 	Name      string
@@ -134,11 +144,43 @@ type Profile struct {
 	UpdatedAt   pgtype.Timestamp
 }
 
+type QuestionOption struct {
+	ID         int64
+	QuestionID int64
+	OptionText string
+	OrderIndex int32
+	CreatedAt  pgtype.Timestamp
+}
+
+type Survey struct {
+	ID                   int64
+	Title                string
+	Description          pgtype.Text
+	Category             string
+	EstimatedTimeMinutes int32
+	Reward               pgtype.Numeric
+	Eligibility          []byte
+	Status               pgtype.Text
+	CreatedBy            int64
+	CreatedAt            pgtype.Timestamp
+	UpdatedAt            pgtype.Timestamp
+}
+
+type SurveyQuestion struct {
+	ID           int64
+	SurveyID     int64
+	QuestionText string
+	QuestionType string
+	IsRequired   pgtype.Bool
+	OrderIndex   int32
+	CreatedAt    pgtype.Timestamp
+}
+
 type User struct {
 	ID            int64
 	Email         string
 	EmailVerified pgtype.Bool
-	Password      string
+	Password      pgtype.Text
 	Role          string
 	GoogleID      pgtype.Text
 	AuthProvider  NullAuthProvider
@@ -146,6 +188,17 @@ type User struct {
 	CreatedAt     pgtype.Timestamp
 	UpdatedAt     pgtype.Timestamp
 	DeletedAt     pgtype.Timestamp
+}
+
+type UserSurveyResponse struct {
+	ID                  int64
+	UserID              int64
+	SurveyID            int64
+	Status              pgtype.Text
+	PercentageCompleted pgtype.Numeric
+	StartedAt           pgtype.Timestamp
+	CompletedAt         pgtype.Timestamp
+	UpdatedAt           pgtype.Timestamp
 }
 
 type Wallet struct {
