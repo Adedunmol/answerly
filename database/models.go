@@ -106,6 +106,13 @@ type AnswerResponse struct {
 	UpdatedAt            pgtype.Timestamp
 }
 
+type Category struct {
+	ID        int64
+	Name      pgtype.Text
+	CreatedAt pgtype.Timestamp
+	UpdatedAt pgtype.Timestamp
+}
+
 type Field struct {
 	ID        int64
 	Name      string
@@ -159,7 +166,7 @@ type Survey struct {
 	Category             string
 	EstimatedTimeMinutes int32
 	Reward               pgtype.Numeric
-	Eligibility          []byte
+	Eligibility          pgtype.Text
 	Status               pgtype.Text
 	CreatedBy            int64
 	CreatedAt            pgtype.Timestamp

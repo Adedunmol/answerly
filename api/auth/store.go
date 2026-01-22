@@ -58,7 +58,7 @@ func (r *Repository) CreateUser(ctx context.Context, body *CreateUserBody) (data
 
 	data, err := r.queries.CreateUser(ctx, database.CreateUserParams{
 		Email:        body.Email,
-		Password:     body.Password,
+		Password:     pgtype.Text{String: body.Password, Valid: len(body.Password) > 0},
 		Role:         body.Role,
 		GoogleID:     pgtype.Text{String: body.GoogleID, Valid: len(body.GoogleID) > 0},
 		AuthProvider: provider,

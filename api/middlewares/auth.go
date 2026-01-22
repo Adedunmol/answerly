@@ -4,6 +4,7 @@ import (
 	"context"
 	"github.com/Adedunmol/answerly/api/jsonutil"
 	"github.com/Adedunmol/answerly/api/tokens"
+	"log"
 	"net/http"
 	"strings"
 )
@@ -42,6 +43,7 @@ func AuthMiddleware(tokenService tokens.TokenService) func(http.Handler) http.Ha
 				return
 			}
 
+			log.Println(data)
 			if !data.Verified {
 				response := jsonutil.Response{
 					Status:  "error",

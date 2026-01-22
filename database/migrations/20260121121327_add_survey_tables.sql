@@ -1,14 +1,22 @@
 -- +goose Up
 -- +goose StatementBegin
+
+CREATE TABLE IF NOT EXISTS categories (
+                            id BIGSERIAL PRIMARY KEY,
+                            name VARCHAR(255),
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Survey table: Contains survey metadata
-CREATE TABLE surveys (
+CREATE TABLE IF NOT EXISTS surveys (
                          id BIGSERIAL PRIMARY KEY,
                          title VARCHAR(255) NOT NULL,
                          description TEXT,
                          category VARCHAR(100) NOT NULL,
                          estimated_time_minutes INT NOT NULL,
                          reward DECIMAL(10, 2) NOT NULL,
-                         eligibility JSONB, -- Store eligibility criteria as JSON
+                         eligibility VARCHAR(10), -- Store eligibility criteria as JSON
                          status VARCHAR(50) DEFAULT 'active', -- active, paused, closed
                          created_by BIGINT NOT NULL,
                          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -16,7 +24,7 @@ CREATE TABLE surveys (
 );
 
 -- Questions table: Contains survey questions
-CREATE TABLE survey_questions (
+CREATE TABLE IF NOT EXISTS survey_questions (
                                   id BIGSERIAL PRIMARY KEY,
                                   survey_id BIGINT NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
                                   question_text TEXT NOT NULL,
@@ -27,7 +35,7 @@ CREATE TABLE survey_questions (
 );
 
 -- Question options table: Contains options for multiple choice questions
-CREATE TABLE question_options (
+CREATE TABLE IF NOT EXISTS question_options (
                                   id BIGSERIAL PRIMARY KEY,
                                   question_id BIGINT NOT NULL REFERENCES survey_questions(id) ON DELETE CASCADE,
                                   option_text TEXT NOT NULL,
@@ -36,7 +44,7 @@ CREATE TABLE question_options (
 );
 
 -- User survey responses table: Tracks user participation and progress
-CREATE TABLE user_survey_responses (
+CREATE TABLE IF NOT EXISTS user_survey_responses (
                                        id BIGSERIAL PRIMARY KEY,
                                        user_id BIGINT NOT NULL,
                                        survey_id BIGINT NOT NULL REFERENCES surveys(id) ON DELETE CASCADE,
@@ -49,7 +57,7 @@ CREATE TABLE user_survey_responses (
 );
 
 -- Answer responses table: Stores individual question answers
-CREATE TABLE answer_responses (
+CREATE TABLE IF NOT EXISTS answer_responses (
                                   id BIGSERIAL PRIMARY KEY,
                                   user_survey_response_id BIGINT NOT NULL REFERENCES user_survey_responses(id) ON DELETE CASCADE,
                                   question_id BIGINT NOT NULL REFERENCES survey_questions(id) ON DELETE CASCADE,
@@ -86,4 +94,5 @@ DROP TABLE IF EXISTS user_survey_responses;
 DROP TABLE IF EXISTS question_options;
 DROP TABLE IF EXISTS survey_questions;
 DROP TABLE IF EXISTS surveys;
+DROP TABLE IF EXISTS categories;
 -- +goose StatementEnd

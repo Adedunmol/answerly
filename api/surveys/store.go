@@ -3,7 +3,6 @@ package surveys
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"github.com/Adedunmol/answerly/database"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -70,18 +69,13 @@ func (r *Repository) CreateSurvey(ctx context.Context, params CreateSurveyParams
 		return database.Survey{}, fmt.Errorf("error scanning reward: %v", err)
 	}
 
-	eligibilityJSON, err := json.Marshal(params.Eligibility)
-	if err != nil {
-		return database.Survey{}, fmt.Errorf("error marshaling eligibility: %v", err)
-	}
-
 	survey, err := r.queries.CreateSurvey(ctx, database.CreateSurveyParams{
 		Title:                params.Title,
 		Description:          pgtype.Text{String: params.Description, Valid: params.Description != ""},
 		Category:             params.Category,
 		EstimatedTimeMinutes: int32(params.EstimatedTimeMinutes),
 		Reward:               reward,
-		Eligibility:          eligibilityJSON,
+		Eligibility:          pgtype.Text{String: params.Eligibility, Valid: len(params.Eligibility) > 0},
 		CreatedBy:            params.CreatedBy,
 	})
 	if err != nil {
@@ -234,11 +228,8 @@ func (r *Repository) UpdateSurvey(ctx context.Context, params UpdateSurveyParams
 	}
 
 	if params.Eligibility != nil {
-		eligibilityJSON, err := json.Marshal(params.Eligibility)
-		if err != nil {
-			return database.Survey{}, fmt.Errorf("error marshaling eligibility: %v", err)
-		}
-		updateParams.Eligibility = eligibilityJSON
+
+		updateParams.Eligibility = pgtype.Text{String: *params.Eligibility, Valid: true}
 	}
 
 	if params.Status != nil {

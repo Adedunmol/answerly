@@ -149,7 +149,7 @@ type CreateSurveyParams struct {
 	Category             string
 	EstimatedTimeMinutes int32
 	Reward               pgtype.Numeric
-	Eligibility          []byte
+	Eligibility          pgtype.Text
 	CreatedBy            int64
 }
 
@@ -522,7 +522,7 @@ type GetSurveyDetailWithQuestionsAndOptionsRow struct {
 	SurveyCategory       string
 	EstimatedTimeMinutes int32
 	Reward               pgtype.Numeric
-	Eligibility          []byte
+	Eligibility          pgtype.Text
 	SurveyStatus         pgtype.Text
 	CreatedBy            int64
 	SurveyCreatedAt      pgtype.Timestamp
@@ -636,7 +636,7 @@ type GetSurveyWithQuestionsRow struct {
 	Category             string
 	EstimatedTimeMinutes int32
 	Reward               pgtype.Numeric
-	Eligibility          []byte
+	Eligibility          pgtype.Text
 	Status               pgtype.Text
 	CreatedBy            int64
 	CreatedAt            pgtype.Timestamp
@@ -981,7 +981,7 @@ type ListUserSurveysRow struct {
 	Category             string
 	EstimatedTimeMinutes int32
 	Reward               pgtype.Numeric
-	Eligibility          []byte
+	Eligibility          pgtype.Text
 	Status               pgtype.Text
 	CreatedBy            int64
 	CreatedAt            pgtype.Timestamp
@@ -1233,7 +1233,7 @@ type UpdateSurveyParams struct {
 	Category             pgtype.Text
 	EstimatedTimeMinutes pgtype.Int4
 	Reward               pgtype.Numeric
-	Eligibility          []byte
+	Eligibility          pgtype.Text
 	Status               pgtype.Text
 }
 

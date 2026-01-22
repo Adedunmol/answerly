@@ -7,13 +7,13 @@ import (
 
 // Parameter structs
 type CreateSurveyParams struct {
-	Title                string
-	Description          string
-	Category             string
-	EstimatedTimeMinutes int
-	Reward               decimal.Decimal
-	Eligibility          map[string]interface{} // Will be stored as JSONB
-	CreatedBy            int64
+	Title                string          `json:"title" validate:"required"`
+	Description          string          `json:"description" validate:"required"`
+	Category             string          `json:"category" validate:"required"`
+	EstimatedTimeMinutes int             `json:"estimated_time_minutes" validate:"required"`
+	Reward               decimal.Decimal `json:"reward" validate:"required"`
+	Eligibility          string          // Will be stored as JSONB
+	CreatedBy            int64           `json:"created_by"`
 }
 
 type UpdateSurveyParams struct {
@@ -23,7 +23,7 @@ type UpdateSurveyParams struct {
 	Category             *string
 	EstimatedTimeMinutes *int
 	Reward               *decimal.Decimal
-	Eligibility          map[string]interface{}
+	Eligibility          *string
 	Status               *string
 }
 

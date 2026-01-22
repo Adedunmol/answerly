@@ -1,5 +1,3 @@
-
-
 # To run the migrations against the database
 ```bash
 $ goose up

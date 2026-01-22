@@ -3,6 +3,7 @@ package api
 import (
 	"github.com/Adedunmol/answerly/api/auth"
 	"github.com/Adedunmol/answerly/api/jsonutil"
+	"github.com/Adedunmol/answerly/api/surveys"
 	"github.com/Adedunmol/answerly/database"
 	"github.com/Adedunmol/answerly/queue"
 	"github.com/go-chi/chi/v5"
@@ -34,6 +35,7 @@ func Routes(queries *database.Queries, queue queue.Queue, pool *pgxpool.Pool) *c
 	})
 
 	auth.SetupRoutes(r, queue, pool, queries)
+	surveys.SetupRoutes(r, queue, pool, queries)
 
 	return r
 }
