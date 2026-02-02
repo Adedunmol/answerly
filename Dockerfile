@@ -76,7 +76,7 @@ RUN apk --no-cache add ca-certificates
 COPY --from=build-stage /app/main .
 COPY --from=build-stage /go/bin/goose /usr/local/bin/goose
 COPY --from=build-stage /app/database/migrations ./migrations
-COPY --from=build-stage /app/api/email/templates ./api/email/templates
+COPY --from=build-stage /app/api/email/templates ./templates
 
 # Expose port
 EXPOSE 5001

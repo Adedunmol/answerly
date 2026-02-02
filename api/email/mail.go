@@ -58,7 +58,7 @@ func parseTemplate(data Email) (bytes.Buffer, error) {
 
 	tmplDir := os.Getenv("TEMPLATES_DIR")
 	if tmplDir == "" {
-		tmplDir = "./api/email/templates" // fallback
+		tmplDir = "./templates" // fallback
 	}
 
 	templatePath := filepath.Join(tmplDir, data.Template+".html")
