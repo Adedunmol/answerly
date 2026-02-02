@@ -82,4 +82,5 @@ COPY --from=build-stage /app/api/email/templates ./templates
 EXPOSE 5001
 
 # Run migrations then start app
-CMD goose up && ./main
+#CMD goose up && ./main
+CMD sh -c "goose up && exec ./main"
