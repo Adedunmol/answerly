@@ -75,7 +75,7 @@ RUN apk --no-cache add ca-certificates
 # Copy binary from build stage
 COPY --from=build-stage /app/main .
 COPY --from=build-stage /go/bin/goose /usr/local/bin/goose
-COPY --from=build-stage /app/migrations ./migrations
+COPY --from=build-stage /app/database/migrations ./migrations
 
 # Expose port
 EXPOSE 5001
