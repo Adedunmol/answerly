@@ -58,6 +58,9 @@ RUN go mod download
 
 COPY . .
 
+# Install goose
+RUN go install github.com/pressly/goose/v3/cmd/goose@latest
+
 # Build binary
 RUN CGO_ENABLED=0 GOOS=linux go build -o main ./main.go
 
@@ -71,9 +74,11 @@ RUN apk --no-cache add ca-certificates
 
 # Copy binary from build stage
 COPY --from=build-stage /app/main .
+COPY --from=build-stage /go/bin/goose /usr/local/bin/goose
+COPY --from=build-stage /app/migrations ./migrations
 
 # Expose port
 EXPOSE 5001
 
-# Run binary
-CMD ["./main"]
+# Run migrations then start app
+CMD goose up && ./main
