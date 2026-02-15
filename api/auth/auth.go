@@ -219,7 +219,7 @@ func (h *Handler) LoginUserHandler(responseWriter http.ResponseWriter, request *
 		jsonutil.WriteJSONResponse(responseWriter, response, http.StatusUnauthorized)
 		return
 	}
-	match := h.Token.ComparePasswords(user.Password, data.Password)
+	match := h.Token.ComparePasswords(user.Password.String, data.Password)
 
 	if !match {
 		response := jsonutil.Response{Status: "error", Message: "invalid credentials"}
@@ -659,7 +659,7 @@ func (h *Handler) ResetPasswordHandler(responseWriter http.ResponseWriter, reque
 		return
 	}
 
-	match := h.Token.ComparePasswords(userData.Password, data.OldPassword)
+	match := h.Token.ComparePasswords(userData.Password.String, data.OldPassword)
 
 	if !match {
 		response := jsonutil.Response{

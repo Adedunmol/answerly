@@ -36,6 +36,34 @@ func (q *Queries) ChargeWallet(ctx context.Context, arg ChargeWalletParams) (Wal
 	return i, err
 }
 
+const createTransaction = `-- name: CreateTransaction :exec
+INSERT INTO transactions (amount, balance_before, balance_after, reference, status, wallet_id, type)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type CreateTransactionParams struct {
+	Amount        pgtype.Numeric
+	BalanceBefore pgtype.Numeric
+	BalanceAfter  pgtype.Numeric
+	Reference     pgtype.Text
+	Status        pgtype.Text
+	WalletID      pgtype.Int8
+	Type          pgtype.Text
+}
+
+func (q *Queries) CreateTransaction(ctx context.Context, arg CreateTransactionParams) error {
+	_, err := q.db.Exec(ctx, createTransaction,
+		arg.Amount,
+		arg.BalanceBefore,
+		arg.BalanceAfter,
+		arg.Reference,
+		arg.Status,
+		arg.WalletID,
+		arg.Type,
+	)
+	return err
+}
+
 const createWallet = `-- name: CreateWallet :one
 INSERT INTO wallets (balance, user_id)
 VALUES ($1, $2)
@@ -75,6 +103,80 @@ func (q *Queries) GetWallet(ctx context.Context, userID int64) (Wallet, error) {
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getWalletWithTransactions = `-- name: GetWalletWithTransactions :many
+SELECT
+    w.id,
+    w.user_id,
+    w.balance,
+    w.created_at,
+    w.updated_at,
+    t.id AS transaction_id,
+    t.amount AS transaction_amount,
+    t.balance_before AS transaction_balance_before,
+    t.balance_after AS transaction_balance_after,
+    t.reference AS transaction_reference,
+    t.status AS transaction_status,
+    t.wallet_id AS transaction_wallet_id,
+    t.created_at AS transaction_created_at,
+    t.updated_at AS transaction_updated_at
+FROM wallets w
+LEFT JOIN transactions t ON w.id = t.wallet_id
+WHERE w.user_id = $1
+ORDER BY t.created_at DESC
+`
+
+type GetWalletWithTransactionsRow struct {
+	ID                       int64
+	UserID                   int64
+	Balance                  pgtype.Numeric
+	CreatedAt                pgtype.Timestamp
+	UpdatedAt                pgtype.Timestamp
+	TransactionID            pgtype.Int8
+	TransactionAmount        pgtype.Numeric
+	TransactionBalanceBefore pgtype.Numeric
+	TransactionBalanceAfter  pgtype.Numeric
+	TransactionReference     pgtype.Text
+	TransactionStatus        pgtype.Text
+	TransactionWalletID      pgtype.Int8
+	TransactionCreatedAt     pgtype.Timestamp
+	TransactionUpdatedAt     pgtype.Timestamp
+}
+
+func (q *Queries) GetWalletWithTransactions(ctx context.Context, userID int64) ([]GetWalletWithTransactionsRow, error) {
+	rows, err := q.db.Query(ctx, getWalletWithTransactions, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetWalletWithTransactionsRow
+	for rows.Next() {
+		var i GetWalletWithTransactionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Balance,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.TransactionID,
+			&i.TransactionAmount,
+			&i.TransactionBalanceBefore,
+			&i.TransactionBalanceAfter,
+			&i.TransactionReference,
+			&i.TransactionStatus,
+			&i.TransactionWalletID,
+			&i.TransactionCreatedAt,
+			&i.TransactionUpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const topUpWallet = `-- name: TopUpWallet :one
